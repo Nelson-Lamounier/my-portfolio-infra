@@ -1,5 +1,8 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Master Nested Stack to deploy portfolio infrastructure components
+
 Resources:
-  LoadBalancerSQ:
+  LoadBalancerSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow HTTP access
@@ -27,7 +30,7 @@ Resources:
     Properties:
       Port: 80
       Protocol: HTTP
-      VpcID: !ImportValue VPC
+      VpcId: !ImportValue VPC
       TargetType: ip
 
   Listener:
@@ -42,6 +45,9 @@ Resources:
 
 Outputs:
   LoadBalancerDNS:
-    Value: !GetAtt: ALB.DNSName
+    Value: !GetAtt ALB.DNSName
   TargetGroupArn:
+    Description: The ARN of the ALB target group
     Value: !Ref TargetGroup
+    Export:
+      Name: TargetGroupArn

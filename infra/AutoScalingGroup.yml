@@ -1,6 +1,6 @@
 Resources:
   AutoScalingGroup:
-    Type: AWS::AutoScalingGroup
+    Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       MinSize: 1
       MaxSize: 1
@@ -9,5 +9,14 @@ Resources:
         - !ImportValue PublicSubnet1
         - !ImportValue PublicSubnet2
       LaunchTemplate:
-        LaunchTemplateId: !Ref LaunchTemplate
-        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+        LaunchTemplateId: !ImportValue LaunchTemplateId
+        Version: !ImportValue LaunchTemplateVersion
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: ECSInstance
+          PropagateAtLaunch: true
+        - Key: AmazonECSManaged
+          Value: 'true'
+          PropagateAtLaunch: true

@@ -1,8 +1,26 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch template for ECS EC2 instances
+
+Parameters:
+  ECSAMI:
+    Description: The Amazon Machine Image ID used for the cluster
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
+
+  ECSCluster:
+    Type: String
+    Description: Name of the ECS Cluster for this EC2 instance
+
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: The public subnet to launch the EC2 instance into
+
 Resources:
   ECSInstanceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -10,6 +28,8 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -17,13 +37,32 @@ Resources:
       Roles:
         - !Ref ECSInstanceRole
 
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ECS EC2 instance with SSH
+      VpcId: !ImportValue VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0 
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0      
+
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateName: PortfolioEC2Template
       LaunchTemplateData:
-        InstanceType: t2.micro
+        InstanceType: t3.medium
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
         ImageId: !Ref ECSAMI
+        KeyName: freelancer-key-pair
         IamInstanceProfile:
           Arn: !GetAtt InstanceProfile.Arn
         SecurityGroupIds:
@@ -31,22 +70,20 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.conf
-            yum update -y
-            yum install -y ecs-init
-            systemctl enable --now ecs
+            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+            yum install -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackId} --resource ContainerInstances --configsets full_install --region ${AWS::Region} &
+            # ECS agent and Docker already included in the ECS-optimized AMI
 
-  ECSAMI:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+Outputs:
+  LaunchTemplateId:
+    Description: Launch template ID
+    Value: !Ref LaunchTemplate
+    Export:
+      Name: LaunchTemplateId
 
-  EC2SecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: ECS EC2 Instance SG
-      VpcId: !ImportValue VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+  LaunchTemplateVersion:
+    Description: Latest launch template version
+    Value: !GetAtt LaunchTemplate.LatestVersionNumber
+    Export:
+      Name: LaunchTemplateVersion

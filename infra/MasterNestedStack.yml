@@ -11,37 +11,48 @@ Parameters:
   ArtifactBucket:
     Type: String
     Description: The S3 bucket used to store build artifacts
+  ECSCluster:
+    Type: String
+    Description: The ECSCluster used on the Launch Template
 
 Resources:
   VPCStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}VPC.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}VPC.yml
 
   LoadBalancerStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: VPCStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}LoadBalancer.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LoadBalancer.yml
   
   LaunchTemplateStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: VPCStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}LaunchTemplate.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LaunchTemplate.yml
+      Parameters:
+        ECSCluster: !Ref ECSCluster
+        PublicSubnetId: !GetAtt VPCStack.Outputs.PublicSubnet1 
 
   ServiceStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: LoadBalancerStack 
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}Service.yml
-
-  PipelineStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}DeploymentPipeline.yml
-      Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Service.yml
 
   AutoScalingStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: LaunchTemplateStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}AutoScalingGroup.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}AutoScalingGroup.yml
+
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}DeploymentPipeline.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
 

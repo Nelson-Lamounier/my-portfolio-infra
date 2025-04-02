@@ -1,8 +1,10 @@
+AWSTemplateFormatVersion: 2010-09-09
+
 Resources:
   ECRRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: portfolio
+      RepositoryName: portfolio-dev
 
   ECSCluster:
     Type: AWS::ECS::Cluster
@@ -13,6 +15,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
@@ -21,22 +24,53 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/portfolio-task
+      RetentionInDays: 1
+        
+
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: portfolio-task
       Cpu: 256
       Memory: 512
-      RequiresCompatibilies:
+      RequiresCompatibilities:
         - EC2
-      NetworkMode: bridge
+      NetworkMode: awsvpc
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: app-container
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio:lastest"
-          Memory: 512
-          PortMapping:
+          Image: nginx:alpine
+          Command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              echo '<h1>Placeholder App</h1>' > /usr/share/nginx/html/index.html && nginx -g 'daemon off;'
+          Essential: true
+          PortMappings:
             - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/portfolio-task
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: ecs
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inboud access to ECS tasks
+      VpcId: !ImportValue VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
 
   ECSService:
     Type: AWS::ECS::Service
@@ -49,6 +83,17 @@ Resources:
         - ContainerName: app-container
           ContainerPort: 80
           TargetGroupArn: !ImportValue TargetGroupArn
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !ImportValue PublicSubnet1
+            - !ImportValue PublicSubnet2
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+      EnableECSManagedTags: true
+      DeploymentController:
+        Type: ECS
+      HealthCheckGracePeriodSeconds: 180
 
 Outputs:
   ECSClusterName:
