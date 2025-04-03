@@ -141,7 +141,7 @@ Resources:
             - Effect: Allow
               Action:
                 - codestar-connections:UseConnection
-              Resource: arn:aws:codeconnections:{AWS::Region2}:${AWS::AccountId}:connection/80ab4b3d-276a-43a1-b827-a357d446d623
+              Resource: !Sub arn:aws:codeconnections:eu-west-2:${AWS::AccountId}:connection/80ab4b3d-276a-43a1-b827-a357d446d623
       
 
   Pipeline:
@@ -161,7 +161,7 @@ Resources:
                 Provider: CodeStarSourceConnection
                 Version: 1
               Configuration:
-                ConnectionArn: arn:aws:codeconnections:${AWS::Region2}:${AWS::AccountId}:connection/80ab4b3d-276a-43a1-b827-a357d446d623
+                ConnectionArn: !Sub arn:aws:codeconnections:eu-west-2:${AWS::AccountId}:connection/80ab4b3d-276a-43a1-b827-a357d446d623
                 FullRepositoryId: Nelson-Lamounier/personalPortfolio
                 BranchName: main
                 OutputArtifactFormat: CODE_ZIP
@@ -193,7 +193,7 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ClusterName: !ImportValue ECSClusterName
-                ServiceName: !ImportValue ECSServiceName
+                ServiceName: !ImportValue ECSServiceNameV2
                 FileName: imagedefinitions.json
 
 

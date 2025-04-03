@@ -1,5 +1,13 @@
 AWSTemplateFormatVersion: 2010-09-09
 
+Parameters:
+  Region:
+    Type: String
+  ECSClusterNameParam:
+    Type: String
+  ECSServiceNameParam:
+    Type: String
+
 Resources:
   ECRRepository:
     Type: AWS::ECR::Repository
@@ -9,7 +17,7 @@ Resources:
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: PortfolioCluster
+      ClusterName: !Ref ECSClusterNameParam
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -36,7 +44,7 @@ Resources:
     Properties:
       Family: portfolio-task
       Cpu: 256
-      Memory: 512
+      Memory: 1024
       RequiresCompatibilities:
         - EC2
       NetworkMode: awsvpc
@@ -44,6 +52,9 @@ Resources:
       ContainerDefinitions:
         - Name: app-container
           Image: nginx:alpine
+          Cpu: 256
+          Memory: 1024
+          MemoryReservation: 512
           Command:
             - "/bin/sh"
             - "-c"
@@ -75,6 +86,7 @@ Resources:
   ECSService:
     Type: AWS::ECS::Service
     Properties:
+      ServiceName: !Ref ECSServiceNameParam
       Cluster: !Ref ECSCluster
       DesiredCount: 1
       LaunchType: EC2
@@ -102,7 +114,8 @@ Outputs:
       Name: ECSClusterName
 
   ECSServiceName:
-    Value: !Ref ECSService
+    Value: !Ref ECSServiceNameParam
     Export:
       Name: ECSServiceName
+
 
