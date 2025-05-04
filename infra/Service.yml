@@ -56,11 +56,7 @@ Resources:
           Cpu: 256
           Memory: 1024
           MemoryReservation: 512
-          Command:
-            - "/bin/sh"
-            - "-c"
-            - |
-              echo '<h1>Placeholder App</h1>' > /usr/share/nginx/html/index.html && nginx -g 'daemon off;'
+
           Essential: true
           PortMappings:
             - ContainerPort: 80
