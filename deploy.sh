@@ -28,13 +28,16 @@ aws s3 cp ./infra/ s3://$BUCKET_NAME/$TEMPLATE_PREFIX --recursive --exclude "*" 
 echo "Deploying master CloudFormation stack..."
 aws cloudformation deploy \
     --template-file ./infra/MasterNestedStack.yml \
-    --stack-name $STACK_NAME \
-    --parameter-overrides \
-      TemplateBucket=$BUCKET_NAME \
-      TemplatePrefix=$TEMPLATE_PREFIX \
-      ArtifactBucket=$ARTIFACT_BUCKET \
-      ECSCluster=$ECS_CLUSTER \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --region $REGION
+  --stack-name "$STACK_NAME" \
+  --parameter-overrides \
+    TemplateBucket="$BUCKET_NAME" \
+    TemplatePrefix="$TEMPLATE_PREFIX" \
+    ArtifactBucket="$ARTIFACT_BUCKET" \
+    ECSCluster="$ECS_CLUSTER" \
+    ECSClusterNameParam="$ECSClusterNameParam" \
+    ECSServiceNameParam="$ECSServiceNameParam" \
+    Region="$Region" \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$REGION"
 
 echo " Deployment initiated for: $STACK_NAME"

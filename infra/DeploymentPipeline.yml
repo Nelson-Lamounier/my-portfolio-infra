@@ -193,7 +193,7 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ClusterName: !ImportValue ECSClusterName
-                ServiceName: !ImportValue ECSServiceNameV2
+                ServiceName: !ImportValue ECSServiceName
                 FileName: imagedefinitions.json
 
 

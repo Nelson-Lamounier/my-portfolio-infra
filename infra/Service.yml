@@ -1,3 +1,5 @@
+# @format
+
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
@@ -37,7 +39,6 @@ Resources:
     Properties:
       LogGroupName: /ecs/portfolio-task
       RetentionInDays: 1
-        
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -51,7 +52,7 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: app-container
-          Image: nginx:alpine
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio-dev:latest"
           Cpu: 256
           Memory: 1024
           MemoryReservation: 512
@@ -81,7 +82,6 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-
 
   ECSService:
     Type: AWS::ECS::Service
@@ -117,5 +117,3 @@ Outputs:
     Value: !Ref ECSServiceNameParam
     Export:
       Name: ECSServiceName
-
-
