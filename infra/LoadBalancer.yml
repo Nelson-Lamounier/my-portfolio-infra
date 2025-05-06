@@ -1,16 +1,27 @@
+# @format
+
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Master Nested Stack to deploy portfolio infrastructure components
+
+Parameters:
+  SSLCertificateArn:
+    Type: String
+    Description: ARN of the ACM SSL certificate to use for HTTPS
 
 Resources:
   LoadBalancerSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow HTTP access
+      GroupDescription: Allow HTTP and HTTPS access
       VpcId: !ImportValue VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
           CidrIp: 0.0.0.0/0
 
   ALB:
@@ -32,20 +43,52 @@ Resources:
       Protocol: HTTP
       VpcId: !ImportValue VPC
       TargetType: ip
+      HealthCheckPath: /healthcheck
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
       LoadBalancerArn: !Ref ALB
       Port: 80
       Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  HTTPSListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref SSLCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
 
 Outputs:
   LoadBalancerDNS:
+    Description: DNS name of the Application Load Balancer
     Value: !GetAtt ALB.DNSName
+    Export:
+      Name: LoadBalancerDNS
+
+  LoadBalancerHostedZoneId:
+    Description: Hosted zone ID for the Application Load Balancer
+    Value: !GetAtt ALB.CanonicalHostedZoneID
+    Export:
+      Name: LoadBalancerHostedZoneId
+
   TargetGroupArn:
     Description: The ARN of the ALB target group
     Value: !Ref TargetGroup
