@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # === LOAD CONFIG FROM .env ===
 if [ -f .env ]; then
@@ -8,8 +9,13 @@ else
   exit 1
 fi
 
+if [[ -z "$REGION" ]]; then
+  echo "REGION not set in .env"
+  exit 1
+fi
+
 # === STEP 1: Check/Create S3 Bucket ===
-echo "Checking if S3 bucket '$BUCKET_NAME' exists..."
+echo "🔍 Checking if S3 bucket '$BUCKET_NAME' exists..."
 if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
     echo "Bucket exists: $BUCKET_NAME"
 else
@@ -22,12 +28,27 @@ fi
 
 # === STEP 2: Upload CloudFormation templates ===
 echo "Uploading templates to S3..."
-aws s3 cp ./infra/ s3://$BUCKET_NAME/$TEMPLATE_PREFIX --recursive --exclude "*" --include "*.yml"
+aws s3 cp ./infra/ s3://"$BUCKET_NAME"/"$TEMPLATE_PREFIX" --recursive --exclude "*" --include "*.yml"
 
-# === STEP 3: Deploy Master Nested Stack ===
-echo "Deploying master CloudFormation stack..."
+# === STEP 3: Fetch Certificate ARN ===
+echo "Fetching Certificate ARN from us-east-1..."
+CERT_ARN=$(aws cloudformation describe-stacks \
+  --stack-name PortfolioCertificateStack \
+  --region eu-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='SSLCertificateArn'].OutputValue" \
+  --output text)
+
+if [[ -z "$CERT_ARN" ]]; then
+  echo "Certificate not found. Please deploy certificate.yml first."
+  exit 1
+fi
+
+echo "Certificate ARN: $CERT_ARN"
+
+# === STEP 4: Deploy Master Nested Stack ===
+echo "Deploying Master Stack to $REGION..."
 aws cloudformation deploy \
-    --template-file ./infra/MasterNestedStack.yml \
+  --template-file ./infra/MasterNestedStack.yml \
   --stack-name "$STACK_NAME" \
   --parameter-overrides \
     TemplateBucket="$BUCKET_NAME" \
@@ -36,8 +57,9 @@ aws cloudformation deploy \
     ECSCluster="$ECS_CLUSTER" \
     ECSClusterNameParam="$ECSClusterNameParam" \
     ECSServiceNameParam="$ECSServiceNameParam" \
-    Region="$Region" \
+    Region="$REGION" \
+    SSLCertificateArn="$CERT_ARN" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION"
 
-echo " Deployment initiated for: $STACK_NAME"
+echo "Master stack deployed successfully."

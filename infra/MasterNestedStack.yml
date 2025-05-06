@@ -18,11 +18,11 @@ Parameters:
     Description: The ECSCluster used on the Launch Template
   ECSServiceNameParam:
     Type: String
-
   ECSClusterNameParam:
     Type: String
-
   Region:
+    Type: String
+  SSLCertificateArn:
     Type: String
 
 Resources:
@@ -36,6 +36,8 @@ Resources:
     DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LoadBalancer.yml
+      Parameters:
+        SSLCertificateArn: !Ref SSLCertificateArn
 
   LaunchTemplateStack:
     Type: AWS::CloudFormation::Stack
