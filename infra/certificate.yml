@@ -1,0 +1,35 @@
+# @format
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ACM Certificate for portfolio domain
+
+Parameters:
+  RootDomainName:
+    Type: String
+    Description: The apex/root domain
+  WWWDomainName:
+    Type: String
+    Description: The www subdomain
+  HostedZoneId:
+    Type: String
+    Description: The Route 53 hosted zone ID for your domain
+
+Resources:
+  SSLCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref RootDomainName
+      SubjectAlternativeNames:
+        - !Ref WWWDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref RootDomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Ref WWWDomainName
+          HostedZoneId: !Ref HostedZoneId
+
+Outputs:
+  SSLCertificateArn:
+    Value: !Ref SSLCertificate
+    Export:
+      Name: SSLCertificateArn
