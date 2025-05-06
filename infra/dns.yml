@@ -1,0 +1,44 @@
+# @format
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Route 53 alias record for ALB
+
+Parameters:
+  RootDomainName:
+    Type: String
+    Description: The root domain
+  WWWDomainName:
+    Type: String
+    Description: The www subdomain
+  HostedZoneId:
+    Type: String
+    Description: The ID of the Route 53 hosted zone
+  LoadBalancerDNS:
+    Type: String
+    Description: DNS name of the ALB
+  LoadBalancerHostedZoneId:
+    Type: String
+    Description: Canonical hosted zone ID of the ALB
+
+Resources:
+  # A record for www.lamounierdigital.com
+  Route53AliasRecordWWW:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref WWWDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !Ref LoadBalancerDNS
+        HostedZoneId: !Ref LoadBalancerHostedZoneId
+
+  # A record for lamounierdigital.com (root domain)
+  Route53AliasRecordRoot:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref RootDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !Ref LoadBalancerDNS
+        HostedZoneId: !Ref LoadBalancerHostedZoneId
