@@ -1,4 +1,6 @@
-AWSTemplateFormatVersion: '2010-09-09'
+# @format
+
+AWSTemplateFormatVersion: "2010-09-09"
 Description: Launch template for ECS EC2 instances
 
 Parameters:
@@ -46,11 +48,11 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0 
+          CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0      
+          CidrIp: 0.0.0.0/0
 
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -84,6 +86,6 @@ Outputs:
 
   LaunchTemplateVersion:
     Description: Latest launch template version
-    Value: !GetAtt LaunchTemplate.LatestVersionNumber
+    Value: "1"
     Export:
       Name: LaunchTemplateVersion

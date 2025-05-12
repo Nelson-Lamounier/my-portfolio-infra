@@ -42,3 +42,14 @@ Resources:
       AliasTarget:
         DNSName: !Ref LoadBalancerDNS
         HostedZoneId: !Ref LoadBalancerHostedZoneId
+
+  # A record for project1.lamounierdigital.com
+  Project1DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: project1.lamounierdigital.com.
+      Type: A
+      AliasTarget:
+        DNSName: !ImportValue LoadBalancerDNS
+        HostedZoneId: !ImportValue LoadBalancerHostedZoneId

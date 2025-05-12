@@ -58,6 +58,18 @@ Resources:
         ECSClusterNameParam: !Ref ECSClusterNameParam
         Region: !Ref Region
 
+  # Project1ServiceStack:
+  #   Type: AWS::CloudFormation::Stack
+  #   DependsOn:
+  #     - LoadBalancerStack
+  #     - ServiceStack
+  #   Properties:
+  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Service.yml
+  #     Parameters:
+  #       ECSServiceNameParam: project1-service
+  #       ECSClusterNameParam: !Ref ECSClusterNameParam
+  #       Region: !Ref Region
+
   AutoScalingStack:
     Type: AWS::CloudFormation::Stack
     DependsOn: LaunchTemplateStack
@@ -71,3 +83,12 @@ Resources:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}DeploymentPipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
+
+  Project1PipelineStackV3:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Pipeline.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
+        Project1ServiceName: !Ref ECSServiceNameParam

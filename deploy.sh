@@ -30,6 +30,7 @@ fi
 echo "Uploading templates to S3..."
 aws s3 cp ./infra/ s3://"$BUCKET_NAME"/"$TEMPLATE_PREFIX" --recursive --exclude "*" --include "*.yml"
 
+
 # === STEP 3: Fetch Certificate ARN ===
 echo "Fetching Certificate ARN from us-east-1..."
 CERT_ARN=$(aws cloudformation describe-stacks \
@@ -56,10 +57,23 @@ aws cloudformation deploy \
     ArtifactBucket="$ARTIFACT_BUCKET" \
     ECSCluster="$ECS_CLUSTER" \
     ECSClusterNameParam="$ECSClusterNameParam" \
-    ECSServiceNameParam="$ECSServiceNameParam" \
+    ECSServiceNameParam="$PORTFOLIO_SERVICE_NAME" \
     Region="$REGION" \
     SSLCertificateArn="$CERT_ARN" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION"
 
 echo "Master stack deployed successfully."
+
+# === STEP 5: Deploy Project1 Pipeline Stack ===
+echo "🚀 Deploying Project1 Pipeline Stack..."
+aws cloudformation deploy \
+  --template-file ./infra/$PROJECT1_TEMPLATE_NAME \
+  --stack-name "$PROJECT1_PIPELINE_STACK_NAME" \
+  --parameter-overrides \
+    ArtifactBucket="$ARTIFACT_BUCKET" \
+    Project1ServiceName="$PROJECT1_SERVICE_NAME" \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$REGION"
+
+echo "✅ Project1 pipeline deployed successfully."

@@ -1,3 +1,5 @@
+# @format
+
 Resources:
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -18,5 +20,5 @@ Resources:
           Value: ECSInstance
           PropagateAtLaunch: true
         - Key: AmazonECSManaged
-          Value: 'true'
+          Value: "true"
           PropagateAtLaunch: true

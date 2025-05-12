@@ -40,12 +40,24 @@ Resources:
       LogGroupName: /ecs/portfolio-task
       RetentionInDays: 1
 
+  Project1LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/project1-task
+      RetentionInDays: 1
+
+  Project2LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/project2-task
+      RetentionInDays: 1
+
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: portfolio-task
-      Cpu: 256
-      Memory: 1024
+      Cpu: 1024
+      Memory: 2048
       RequiresCompatibilities:
         - EC2
       NetworkMode: awsvpc
@@ -53,10 +65,9 @@ Resources:
       ContainerDefinitions:
         - Name: app-container
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio-dev:latest"
-          Cpu: 256
+          Cpu: 512
           Memory: 1024
           MemoryReservation: 512
-
           Essential: true
           PortMappings:
             - ContainerPort: 80
@@ -68,6 +79,36 @@ Resources:
               awslogs-region: !Ref "AWS::Region"
               awslogs-stream-prefix: ecs
 
+        - Name: project1-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/project1-dev:latest"
+          Cpu: 128
+          Memory: 512
+          MemoryReservation: 256
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/project1-task
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
+        - Name: project2-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/project2-dev:latest"
+          Cpu: 128
+          Memory: 512
+          MemoryReservation: 256
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/project2-task
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -77,6 +118,14 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3001
           CidrIp: 0.0.0.0/0
 
   ECSService:
@@ -91,6 +140,14 @@ Resources:
         - ContainerName: app-container
           ContainerPort: 80
           TargetGroupArn: !ImportValue TargetGroupArn
+
+        - ContainerName: project1-container
+          ContainerPort: 3000
+          TargetGroupArn: !ImportValue Project1TargetGroupArn
+
+        - ContainerName: project1-container
+          ContainerPort: 3001
+          TargetGroupArn: !ImportValue Project2TargetGroupArn
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets:
@@ -113,3 +170,18 @@ Outputs:
     Value: !Ref ECSServiceNameParam
     Export:
       Name: ECSServiceName
+
+  TaskExecutionRoleArn:
+    Description: ARN of the ECS task execution role
+    Value: !GetAtt TaskExecutionRole.Arn
+    Export:
+      Name: TaskExecutionRoleArn
+
+  TaskSecurityGroup:
+    Value: !Ref TaskSecurityGroup
+    Export:
+      Name: TaskSecurityGroup
+
+  ForceUpdate:
+    Description: Dummy output to force stack update
+    Value: "1"
