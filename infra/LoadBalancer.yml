@@ -70,12 +70,44 @@ Resources:
   Project2TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: project1-target-group
+      Name: project2-target-group
       VpcId: !ImportValue VPC
       Protocol: HTTP
       Port: 3001
       TargetType: ip
-      HealthCheckPath: /api/healthcheck
+      HealthCheckPath: /index.html
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+
+  ProjectFrontendEcommTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: project-frontend-tg
+      VpcId: !ImportValue VPC
+      Protocol: HTTP
+      Port: 3002
+      TargetType: ip
+      HealthCheckPath: /healthcheck
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 2
+      Matcher:
+        HttpCode: 200
+
+  ProjectBackendEcommTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: project-backend-tg
+      VpcId: !ImportValue VPC
+      Protocol: HTTP
+      Port: 4000
+      TargetType: ip
+      HealthCheckPath: /healthcheck
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 3
@@ -144,7 +176,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       ListenerArn: !Ref HTTPSListener
-      Priority: 20
+      Priority: 30
       Conditions:
         - Field: host-header
           HostHeaderConfig:
@@ -153,6 +185,34 @@ Resources:
       Actions:
         - Type: forward
           TargetGroupArn: !Ref Project2TargetGroup
+
+  ProjectFrontendEcommListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 40
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - project3.lamounierdigital.com
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ProjectFrontendEcommTargetGroup
+
+  ProjectBackendEcommListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPSListener
+      Priority: 50
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - api.lamounierdigital.com
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ProjectBackendEcommTargetGroup
 
 Outputs:
   LoadBalancerDNS:
@@ -184,3 +244,15 @@ Outputs:
     Value: !Ref Project2TargetGroup
     Export:
       Name: Project2TargetGroupArn
+
+  ProjectFrontendEcommTargetGroupArn:
+    Description: Target Group ARN for project3(Frontend ecommerce application)
+    Value: !Ref ProjectFrontendEcommTargetGroup
+    Export:
+      Name: ProjectFrontendEcommTargetGroupArn
+
+  ProjectBackendEcommTargetGroupArn:
+    Description: Target Group ARN for backend ecommerce application
+    Value: !Ref ProjectBackendEcommTargetGroup
+    Export:
+      Name: ProjectBackendEcommTargetGroupArn
