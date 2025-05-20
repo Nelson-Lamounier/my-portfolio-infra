@@ -35,30 +35,6 @@ Resources:
       LogGroupName: /ecs/portfolio-task
       RetentionInDays: 1
 
-  Project1LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/project1-task
-      RetentionInDays: 1
-
-  Project2LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/project2-task
-      RetentionInDays: 1
-
-  ProjectFrontendEcommLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/frontend-ecomm-task
-      RetentionInDays: 1
-
-  ProjectBackendEcommLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/backend-ecomm-task
-      RetentionInDays: 1
-
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -195,114 +171,6 @@ Resources:
         MaximumPercent: 100
         MinimumHealthyPercent: 0
 
-  Project1ECSService:
-    Type: AWS::ECS::Service
-    Properties:
-      ServiceName: project1-service
-      Cluster: !Ref ECSCluster
-      DesiredCount: 1
-      LaunchType: EC2
-      TaskDefinition: !Ref TaskDefinition
-      LoadBalancers:
-        - ContainerName: project1-container
-          ContainerPort: 3000
-          TargetGroupArn: !ImportValue Project1TargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !Ref TaskSecurityGroup
-      EnableECSManagedTags: true
-      DeploymentController:
-        Type: ECS
-      HealthCheckGracePeriodSeconds: 180
-      DeploymentConfiguration:
-        MaximumPercent: 100
-        MinimumHealthyPercent: 0
-
-  Project2ECSService:
-    Type: AWS::ECS::Service
-    Properties:
-      ServiceName: project2-service
-      Cluster: !Ref ECSCluster
-      DesiredCount: 1
-      LaunchType: EC2
-      TaskDefinition: !Ref TaskDefinition
-      LoadBalancers:
-        - ContainerName: project2-container
-          ContainerPort: 3001
-          TargetGroupArn: !ImportValue Project2TargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !Ref TaskSecurityGroup
-      EnableECSManagedTags: true
-      DeploymentController:
-        Type: ECS
-      HealthCheckGracePeriodSeconds: 180
-      DeploymentConfiguration:
-        MaximumPercent: 100
-        MinimumHealthyPercent: 0
-
-  ProjectFrontendECSService:
-    Type: AWS::ECS::Service
-    Properties:
-      ServiceName: Ec-Frontend-service
-      Cluster: !Ref ECSCluster
-      DesiredCount: 1
-      LaunchType: EC2
-      TaskDefinition: !Ref TaskDefinition
-      LoadBalancers:
-        - ContainerName: project-frontend-ecomm-container
-          ContainerPort: 3002
-          TargetGroupArn: !ImportValue ProjectFrontendEcommTargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !Ref TaskSecurityGroup
-      EnableECSManagedTags: true
-      DeploymentController:
-        Type: ECS
-      HealthCheckGracePeriodSeconds: 180
-      DeploymentConfiguration:
-        MaximumPercent: 100
-        MinimumHealthyPercent: 0
-
-  ProjectBackendECSService:
-    Type: AWS::ECS::Service
-    Properties:
-      ServiceName: Ec-Backend-service
-      Cluster: !Ref ECSCluster
-      DesiredCount: 1
-      LaunchType: EC2
-      TaskDefinition: !Ref TaskDefinition
-      LoadBalancers:
-        - ContainerName: project-backend-ecomm-container
-          ContainerPort: 4000
-          TargetGroupArn: !ImportValue ProjectBackendEcommTargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !Ref TaskSecurityGroup
-      EnableECSManagedTags: true
-      DeploymentController:
-        Type: ECS
-      HealthCheckGracePeriodSeconds: 180
-      DeploymentConfiguration:
-        MaximumPercent: 100
-        MinimumHealthyPercent: 0
-
 Outputs:
   ECSClusterName:
     Value: !Ref ECSCluster
@@ -313,26 +181,6 @@ Outputs:
     Value: !Ref ECSServiceNameParam
     Export:
       Name: ECSServiceName
-
-  Project1ECSServiceName:
-    Value: !Ref Project1ECSService
-    Export:
-      Name: Project1ECSServiceName
-
-  Project2ECSServiceName:
-    Value: !Ref Project2ECSService
-    Export:
-      Name: Project2ECSServiceName
-
-  ProjectFrontendECSServiceName:
-    Value: !Ref ProjectFrontendECSService
-    Export:
-      Name: ProjectFrontendECSServiceName
-
-  ProjectBackendECSServiceName:
-    Value: !Ref ProjectBackendECSService
-    Export:
-      Name: ProjectBackendECSServiceName
 
   TaskExecutionRoleArn:
     Description: ARN of the ECS task execution role
