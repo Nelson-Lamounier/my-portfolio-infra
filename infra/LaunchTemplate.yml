@@ -59,7 +59,7 @@ Resources:
     Properties:
       LaunchTemplateName: PortfolioEC2Template
       LaunchTemplateData:
-        InstanceType: t3.medium
+        InstanceType: t3.large
         MetadataOptions:
           HttpTokens: required
           HttpEndpoint: enabled

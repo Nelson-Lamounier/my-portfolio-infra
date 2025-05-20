@@ -1,0 +1,162 @@
+# @format
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CI/CD Pipeline for Project2 (Docker → ECR → ECS)
+
+Parameters:
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket for CodePipeline artifacts
+
+  ProjectEcommServiceName:
+    Type: String
+    Description: Name of the ECS service to update
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+        - arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess
+      Policies:
+        - PolicyName: AllowS3AccessForBuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+        - PolicyName: CodeBuildLoggingPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+        - PolicyName: CodeBuildSSMAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dockerhub/password
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dockerhub/username
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DeletionPolicy: Retain
+    Properties:
+      Name: ProjectFrontendEcommCodeBuild
+      Source:
+        Type: CODEPIPELINE
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:6.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodePipelineFullAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:*
+                  - ecs:*
+                  - iam:PassRole
+                  - s3:*
+                  - ssm:GetParameter
+                  - codestar-connections:UseConnection
+                Resource: "*"
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              Configuration:
+                ConnectionArn: !Sub arn:aws:codeconnections:${AWS::Region}:${AWS::AccountId}:connection/c6610d18-9ec4-40bf-8bb3-ca7566d4191c
+                FullRepositoryId: Nelson-Lamounier/fullstack-demo
+                BranchName: main
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Build
+          Actions:
+            - Name: GenerateImageDef
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+        - Name: Deploy
+          Actions:
+            - Name: DeployToECS
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: 1
+              InputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ClusterName: !ImportValue ECSClusterName
+                ServiceName: !Ref ProjectFullStackECSServiceName
+                FileName: imagedefinitions.json

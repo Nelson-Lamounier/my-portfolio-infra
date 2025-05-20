@@ -9,7 +9,7 @@ Parameters:
     Description: S3 Bucket containing the nested templates
   TemplatePrefix:
     Type: String
-    Description: Optional prefix (Folder) in the bucket (e.g., "infra/")
+    Description: Folder path
   ArtifactBucket:
     Type: String
     Description: The S3 bucket used to store build artifacts
@@ -58,17 +58,32 @@ Resources:
         ECSClusterNameParam: !Ref ECSClusterNameParam
         Region: !Ref Region
 
-  # Project1ServiceStack:
-  #   Type: AWS::CloudFormation::Stack
-  #   DependsOn:
-  #     - LoadBalancerStack
-  #     - ServiceStack
-  #   Properties:
-  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Service.yml
-  #     Parameters:
-  #       ECSServiceNameParam: project1-service
-  #       ECSClusterNameParam: !Ref ECSClusterNameParam
-  #       Region: !Ref Region
+  Project1ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Service.yml
+      Parameters:
+        ECSServiceNameParam: project1-service
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        Region: !Ref Region
+
+  Project2ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project2Service.yml
+      Parameters:
+        ECSServiceNameParam: project2-service
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        Region: !Ref Region
+
+  ProjectFullStackServiceStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}ProjectFullStackService.yml
+      Parameters:
+        ECSServiceNameParam: ecom-fullstack-service
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        Region: !Ref Region
 
   AutoScalingStack:
     Type: AWS::CloudFormation::Stack
@@ -84,11 +99,29 @@ Resources:
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
 
-  Project1PipelineStackV3:
+  Project1PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: ServiceStack
+    DependsOn: Project1ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
-        Project1ServiceName: !Ref ECSServiceNameParam
+        Project1ServiceName: !GetAtt Project1ServiceStack.Outputs.Project1ECSServiceName
+
+  Project2PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: Project2ServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project2Pipeline.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
+        Project2ServiceName: !GetAtt Project2ServiceStack.Outputs.Project2ECSServiceName
+
+  Project3PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ProjectFullStackServiceStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project3Pipeline.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
+        ProjectEcommServiceName: !GetAtt ProjectFullStackServiceStack.Outputs.ProjectFullStackECSServiceName

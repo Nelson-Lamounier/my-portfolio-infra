@@ -10,6 +10,23 @@ Parameters:
   WWWDomainName:
     Type: String
     Description: The www subdomain
+
+  Project1DomainName:
+    Type: String
+    Description: The project1 subdomain (e.g. project1.lamounierdigital.com)
+
+  Project2DomainName:
+    Type: String
+    Description: The project2 subdomain (e.g. project2.lamounierdigital.com)
+
+  ProjectFEDomainName:
+    Type: String
+    Description: The project3 subdomain (e.g. project3.lamounierdigital.com)
+
+  ProjectBEDomainName:
+    Type: String
+    Description: The project3-Backend subdomain (e.g. api.lamounierdigital.com)
+
   HostedZoneId:
     Type: String
     Description: The Route 53 hosted zone ID for your domain
@@ -21,11 +38,23 @@ Resources:
       DomainName: !Ref RootDomainName
       SubjectAlternativeNames:
         - !Ref WWWDomainName
+        - !Ref Project1DomainName
+        - !Ref Project2DomainName
+        - !Ref ProjectFEDomainName
+        - !Ref ProjectBEDomainName
       ValidationMethod: DNS
       DomainValidationOptions:
         - DomainName: !Ref RootDomainName
           HostedZoneId: !Ref HostedZoneId
         - DomainName: !Ref WWWDomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Ref Project1DomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Ref Project2DomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Ref ProjectFEDomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Ref ProjectBEDomainName
           HostedZoneId: !Ref HostedZoneId
 
 Outputs:

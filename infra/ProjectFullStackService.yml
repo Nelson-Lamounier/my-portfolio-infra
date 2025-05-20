@@ -1,0 +1,100 @@
+# @format
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  Region:
+    Type: String
+  ECSClusterNameParam:
+    Type: String
+  ECSServiceNameParam:
+    Type: String
+
+Resources:
+  ProjectFrontendEcommLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/frontend-ecomm-task-${AWS::StackName}
+      RetentionInDays: 1
+
+  ProjectBackendEcommLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/backend-ecomm-task-${AWS::StackName}
+      RetentionInDays: 1
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: portfolio-task
+      Cpu: 526
+      Memory: 512
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
+      ContainerDefinitions:
+        - Name: project-frontend-ecomm-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/frontend-ecomm-dev:latest"
+          Cpu: 128
+          MemoryReservation: 256
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3002
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub /ecs/frontend-ecomm-task-${AWS::StackName}
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
+        - Name: project-backend-ecomm-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/backend-ecomm-dev:latest"
+          Cpu: 128
+          MemoryReservation: 256
+          Essential: false
+          PortMappings:
+            - ContainerPort: 4000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub /ecs/backend-ecomm-task-${AWS::StackName}
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
+  ProjectFullStackECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: fullstack-ecomm-service
+      Cluster: !ImportValue ECSClusterName
+      DesiredCount: 1
+      LaunchType: EC2
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers:
+        - ContainerName: project-frontend-ecomm-container
+          ContainerPort: 3002
+          TargetGroupArn: !ImportValue ProjectFrontendEcommTargetGroupArn
+
+        - ContainerName: project-backend-ecomm-container
+          ContainerPort: 4000
+          TargetGroupArn: !ImportValue ProjectBackendEcommTargetGroupArn
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !ImportValue PublicSubnet1
+            - !ImportValue PublicSubnet2
+          SecurityGroups:
+            - !ImportValue TaskSecurityGroup
+      EnableECSManagedTags: true
+      DeploymentController:
+        Type: ECS
+      HealthCheckGracePeriodSeconds: 180
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+
+Outputs:
+  ProjectFullStackECSServiceName:
+    Value: !Ref ProjectFullStackECSService
+    Export:
+      Name: ProjectFullStackECSServiceName

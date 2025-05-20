@@ -1,11 +1,9 @@
-# @format
-
-AWSTemplateFormatVersion: "2010-09-09"
+AWSTemplateFormatVersion: '2010-09-09'
 Description: VPC with public subnets and internet access
 
 Resources:
   VPC:
-    Type: AWS::EC2::VPC
+    Type: AWS::EC2::VPC 
     Properties:
       CidrBlock: 10.0.0.0/16
       EnableDnsSupport: true
@@ -25,10 +23,10 @@ Resources:
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
-    Properties:
+    Properties: 
       VpcId: !Ref VPC
       CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      AvailabilityZone: !Select [0, !GetAZs '']
       MapPublicIpOnLaunch: true
 
   PublicSubnet2:
@@ -36,7 +34,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [1, !GetAZs ""]
+      AvailabilityZone: !Select [1, !GetAZs '']
       MapPublicIpOnLaunch: true
 
   PublicRouteTable:

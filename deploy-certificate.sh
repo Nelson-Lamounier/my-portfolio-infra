@@ -25,6 +25,10 @@ aws cloudformation deploy \
   --parameter-overrides \
     WWWDomainName="$WWW_DOMAIN_NAME" \
     RootDomainName="$ROOT_DOMAIN_NAME" \
+    Project1DomainName="$SUB_1_DOMAIN_NAME" \
+    Project2DomainName="$SUB_2_DOMAIN_NAME" \
+    ProjectFEDomainName="$PROJECT_FRONTEND_ECOMM_DOMAIN" \
+    ProjectBEDomainName="$PROJECT_BACKEND_ECOMM_DOMAIN" \
     HostedZoneId="$HOSTED_ZONE_ID" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$CERT_REGION"

@@ -65,15 +65,36 @@ aws cloudformation deploy \
 
 echo "Master stack deployed successfully."
 
-# === STEP 5: Deploy Project1 Pipeline Stack ===
-echo "🚀 Deploying Project1 Pipeline Stack..."
-aws cloudformation deploy \
-  --template-file ./infra/$PROJECT1_TEMPLATE_NAME \
-  --stack-name "$PROJECT1_PIPELINE_STACK_NAME" \
-  --parameter-overrides \
-    ArtifactBucket="$ARTIFACT_BUCKET" \
-    Project1ServiceName="$PROJECT1_SERVICE_NAME" \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region "$REGION"
+# === STEP 5: Monitor Stack and Cancel If Timeout ===
+echo "⏱️ Monitoring stack for up to 15 minutes..."
+STACK_NAME="PortfolioMasterStack"
+TIMEOUT=900  # 15 minutes
+START_TIME=$(date +%s)
 
-echo "✅ Project1 pipeline deployed successfully."
+while true; do
+  STATUS=$(aws cloudformation describe-stacks \
+    --stack-name $STACK_NAME \
+    --region $REGION \
+    --query "Stacks[0].StackStatus" \
+    --output text)
+
+  echo "Stack status: $STATUS"
+
+  if [[ "$STATUS" == *"COMPLETE"* ]]; then
+    echo "Stack completed: $STATUS"
+    break
+  elif [[ "$STATUS" == *"ROLLBACK"* || "$STATUS" == *"FAILED"* ]]; then
+    echo "Stack failed or rolled back: $STATUS"
+    break
+  fi
+
+  ELAPSED=$(( $(date +%s) - $START_TIME ))
+  if (( ELAPSED > TIMEOUT )); then
+    echo "Timeout reached. Cancelling update..."
+    aws cloudformation cancel-update-stack --stack-name $STACK_NAME --region $REGION
+    break
+  fi
+
+  sleep 20
+done
+

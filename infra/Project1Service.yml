@@ -2,21 +2,54 @@
 
 AWSTemplateFormatVersion: 2010-09-09
 
+Parameters:
+  Region:
+    Type: String
+  ECSClusterNameParam:
+    Type: String
+  ECSServiceNameParam:
+    Type: String
+
 Resources:
   Project1LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /ecs/project1-task
+      LogGroupName: !Sub /ecs/project1-task-${AWS::StackName}
       RetentionInDays: 1
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: project1-task
+      Cpu: 128
+      Memory: 256
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
+      ContainerDefinitions:
+        - Name: project1-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/project1-dev:latest"
+          Cpu: 128
+          MemoryReservation: 256
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub /ecs/project1-task-${AWS::StackName}
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
 
   Project1ECSService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: project1-service
-      Cluster: !ImportValue ECSCluster
+      ServiceName: !Ref ECSServiceNameParam
+      Cluster: !ImportValue ECSClusterName
       DesiredCount: 1
       LaunchType: EC2
-      TaskDefinition: !ImportValue TaskDefinition
+      TaskDefinition: !Ref TaskDefinition
       LoadBalancers:
         - ContainerName: project1-container
           ContainerPort: 3000

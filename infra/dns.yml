@@ -10,15 +10,17 @@ Parameters:
   WWWDomainName:
     Type: String
     Description: The www subdomain
+  Project1Domain:
+    Type: String
+  Project2Domain:
+    Type: String
+  ProjectFrontendEcommDomain:
+    Type: String
+  ProjectBackendEcommDomain:
+    Type: String
   HostedZoneId:
     Type: String
     Description: The ID of the Route 53 hosted zone
-  LoadBalancerDNS:
-    Type: String
-    Description: DNS name of the ALB
-  LoadBalancerHostedZoneId:
-    Type: String
-    Description: Canonical hosted zone ID of the ALB
 
 Resources:
   # A record for www.lamounierdigital.com
@@ -29,8 +31,8 @@ Resources:
       Name: !Ref WWWDomainName
       Type: A
       AliasTarget:
-        DNSName: !Ref LoadBalancerDNS
-        HostedZoneId: !Ref LoadBalancerHostedZoneId
+        DNSName: !ImportValue LoadBalancerDNS
+        HostedZoneId: !ImportValue LoadBalancerHostedZoneId
 
   # A record for lamounierdigital.com (root domain)
   Route53AliasRecordRoot:
@@ -40,16 +42,51 @@ Resources:
       Name: !Ref RootDomainName
       Type: A
       AliasTarget:
-        DNSName: !Ref LoadBalancerDNS
-        HostedZoneId: !Ref LoadBalancerHostedZoneId
+        DNSName: !ImportValue LoadBalancerDNS
+        HostedZoneId: !ImportValue LoadBalancerHostedZoneId
 
   # A record for project1.lamounierdigital.com
   Project1DNSRecord:
     Type: AWS::Route53::RecordSet
     Properties:
       HostedZoneId: !Ref HostedZoneId
-      Name: project1.lamounierdigital.com.
+      Name: !Ref Project1Domain
       Type: A
       AliasTarget:
         DNSName: !ImportValue LoadBalancerDNS
         HostedZoneId: !ImportValue LoadBalancerHostedZoneId
+
+    # A record for project2.lamounierdigital.com
+  Project2DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref Project2Domain
+      Type: A
+      AliasTarget:
+        DNSName: !ImportValue LoadBalancerDNS
+        HostedZoneId: !ImportValue LoadBalancerHostedZoneId
+
+    # A record for project3.lamounierdigital.com
+  ProjectFrontendEcommDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ProjectFrontendEcommDomain
+      Type: A
+      AliasTarget:
+        DNSName: !ImportValue LoadBalancerDNS
+        HostedZoneId: !ImportValue LoadBalancerHostedZoneId
+
+    # A record for api.lamounierdigital.com
+  ProjectFrontendEcommDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ProjectBackendEcommDomain
+      Type: A
+      AliasTarget:
+        DNSName: !ImportValue LoadBalancerDNS
+        HostedZoneId: !ImportValue LoadBalancerHostedZoneId
+
+  
