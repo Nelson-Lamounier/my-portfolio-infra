@@ -2,14 +2,6 @@
 
 AWSTemplateFormatVersion: 2010-09-09
 
-Parameters:
-  Region:
-    Type: String
-  ECSClusterNameParam:
-    Type: String
-  ECSServiceNameParam:
-    Type: String
-
 Resources:
   Project1LogGroup:
     Type: AWS::Logs::LogGroup
@@ -17,43 +9,17 @@ Resources:
       LogGroupName: /ecs/project1-task
       RetentionInDays: 1
 
-  Project1TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: project1-task
-      Cpu: 256
-      Memory: 1024
-      RequiresCompatibilities:
-        - EC2
-      NetworkMode: awsvpc
-      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
-      ContainerDefinitions:
-        - Name: project1-container
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/project1-dev:latest"
-          Cpu: 256
-          Memory: 1024
-          MemoryReservation: 512
-          Essential: true
-          PortMappings:
-            - ContainerPort: 80
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: /ecs/project1-task
-              awslogs-region: !Ref Region
-              awslogs-stream-prefix: ecs
-
   Project1ECSService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: !Ref ECSServiceNameParam
-      Cluster: !Ref ECSClusterNameParam
+      ServiceName: project1-service
+      Cluster: !ImportValue ECSCluster
       DesiredCount: 1
       LaunchType: EC2
-      TaskDefinition: !Ref Project1TaskDefinition
+      TaskDefinition: !ImportValue TaskDefinition
       LoadBalancers:
         - ContainerName: project1-container
-          ContainerPort: 80
+          ContainerPort: 3000
           TargetGroupArn: !ImportValue Project1TargetGroupArn
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -66,9 +32,12 @@ Resources:
       DeploymentController:
         Type: ECS
       HealthCheckGracePeriodSeconds: 180
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
 
 Outputs:
-  Project1ServiceName:
-    Value: !Ref ECSServiceNameParam
+  Project1ECSServiceName:
+    Value: !Ref Project1ECSService
     Export:
-      Name: Project1ServiceName
+      Name: Project1ECSServiceName
