@@ -53,6 +53,14 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3002
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          CidrIp: 0.0.0.0/0
 
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -73,6 +81,9 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+            echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
+            mkdir -p /data/docker
+            echo "OPTIONS=\"--data-root=/data/docker\"" >> /etc/docker/daemon.json
             yum install -y aws-cfn-bootstrap
             /opt/aws/bin/cfn-init -v --stack ${AWS::StackId} --resource ContainerInstances --configsets full_install --region ${AWS::Region} &
             # ECS agent and Docker already included in the ECS-optimized AMI
