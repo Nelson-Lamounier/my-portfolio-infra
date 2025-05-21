@@ -42,7 +42,7 @@ Resources:
       Port: 80
       Protocol: HTTP
       VpcId: !ImportValue VPC
-      TargetType: ip
+      TargetType: instance
       HealthCheckPath: /healthcheck
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
@@ -58,7 +58,7 @@ Resources:
       VpcId: !ImportValue VPC
       Protocol: HTTP
       Port: 3000
-      TargetType: ip
+      TargetType: instance
       HealthCheckPath: /api/healthcheck
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
@@ -74,7 +74,7 @@ Resources:
       VpcId: !ImportValue VPC
       Protocol: HTTP
       Port: 3001
-      TargetType: ip
+      TargetType: instance
       HealthCheckPath: /index.html
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
@@ -90,7 +90,7 @@ Resources:
       VpcId: !ImportValue VPC
       Protocol: HTTP
       Port: 3002
-      TargetType: ip
+      TargetType: instance
       HealthCheckPath: /healthcheck
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
@@ -106,7 +106,7 @@ Resources:
       VpcId: !ImportValue VPC
       Protocol: HTTP
       Port: 4000
-      TargetType: ip
+      TargetType: instance
       HealthCheckPath: /healthcheck
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
