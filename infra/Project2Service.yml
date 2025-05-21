@@ -25,7 +25,7 @@ Resources:
       Memory: 256
       RequiresCompatibilities:
         - EC2
-      NetworkMode: awsvpc
+      NetworkMode: bridge #Changed from awsvpc to bridge
       ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
       ContainerDefinitions:
         - Name: project2-container
@@ -35,6 +35,7 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 3001
+              HostPort: 3001 # Explicit host port required for bridge mode
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -54,13 +55,6 @@ Resources:
         - ContainerName: project2-container
           ContainerPort: 3001
           TargetGroupArn: !ImportValue Project2TargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !ImportValue TaskSecurityGroup
       EnableECSManagedTags: true
       DeploymentController:
         Type: ECS

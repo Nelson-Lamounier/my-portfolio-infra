@@ -57,7 +57,6 @@ aws cloudformation deploy \
     ArtifactBucket="$ARTIFACT_BUCKET" \
     ECSCluster="$ECS_CLUSTER" \
     ECSClusterNameParam="$ECSClusterNameParam" \
-    ECSServiceNameParam="$PORTFOLIO_SERVICE_NAME" \
     Region="$REGION" \
     SSLCertificateArn="$CERT_ARN" \
   --capabilities CAPABILITY_NAMED_IAM \
