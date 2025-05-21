@@ -30,6 +30,13 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}VPC.yml
+      Tags:
+        - Key: Project
+          Value: Portfolio
+        - Key: Environment
+          Value: Dev
+        - Key: Owner
+          Value: Nelson
 
   LoadBalancerStack:
     Type: AWS::CloudFormation::Stack

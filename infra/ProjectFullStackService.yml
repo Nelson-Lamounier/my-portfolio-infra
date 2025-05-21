@@ -41,6 +41,7 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 3002
+              HostPort: 3002 # Required in bridge mode
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -55,6 +56,7 @@ Resources:
           Essential: false
           PortMappings:
             - ContainerPort: 4000
+              HostPort: 4000 # Required in bridge mode
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -78,13 +80,6 @@ Resources:
         - ContainerName: project-backend-ecomm-container
           ContainerPort: 4000
           TargetGroupArn: !ImportValue ProjectBackendEcommTargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !ImportValue TaskSecurityGroup
       EnableECSManagedTags: true
       DeploymentController:
         Type: ECS
