@@ -43,7 +43,7 @@ Resources:
       Memory: 1024
       RequiresCompatibilities:
         - EC2
-      NetworkMode: awsvpc
+      NetworkMode: bridge #Changed from awsvpc to bridge
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       ContainerDefinitions:
         - Name: app-container
@@ -53,6 +53,7 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 80
+              HostPort: 8080 #Explicit host port
               Protocol: tcp
           LogConfiguration:
             LogDriver: awslogs
