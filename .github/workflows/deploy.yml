@@ -1,0 +1,114 @@
+# @format
+
+name: Deploy Infrastructure to AWS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "deploy.sh"
+      - "validate-templates.sh"
+
+jobs:
+  validate:
+    name: Validate CloudFormation Templates
+    runs-on: ubuntu-latest
+
+    env:
+      REGION: ${{ secrets.REGION }}
+      BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+      TEMPLATE_PREFIX: ${{ secrets.TEMPLATE_PREFIX }}
+      ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      ECSClusterNameParam: ${{ secrets.ECSClusterNameParam }}
+      STACK_NAME: ${{ secrets.STACK_NAME }}
+      ENVIRONMENT: ${{ secrets.ENVIRONMENT }}
+      ROOT_DOMAIN_NAME: ${{ secrets.ROOT_DOMAIN_NAME }}
+      WWW_DOMAIN_NAME: ${{ secrets.WWW_DOMAIN_NAME }}
+      PROJECT1_DOMAIN: ${{ secrets.PROJECT1_DOMAIN }}
+      PROJECT2_DOMAIN: ${{ secrets.PROJECT2_DOMAIN }}
+      PROJECT3_FRONTEND_DOMAIN: ${{ secrets.PROJECT3_FRONTEND_DOMAIN }}
+      PROJECT3_BACKEND_DOMAIN: ${{ secrets.PROJECT3_BACKEND_DOMAIN }}
+      HOSTED_ZONE_ID: ${{ secrets.HOSTED_ZONE_ID }}
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Run Template Validation
+        run: ./validate-templates.sh
+  deploy:
+    name: Deploy Infrastructure to AWS
+    runs-on: ubuntu-latest
+    needs: validate
+
+    env:
+      REGION: ${{ secrets.REGION }}
+      BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+      TEMPLATE_PREFIX: ${{ secrets.TEMPLATE_PREFIX }}
+      ARTIFACT_BUCKET: ${{ secrets.ARTIFACT_BUCKET }}
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      ECSClusterNameParam: ${{ secrets.ECSClusterNameParam }}
+      PORTFOLIO_SERVICE_NAME: ${{ secrets.PORTFOLIO_SERVICE_NAME }}
+      STACK_NAME: ${{ secrets.STACK_NAME }}
+      ENVIRONMENT: ${{ secrets.ENVIRONMENT }}
+      ROOT_DOMAIN_NAME: ${{ secrets.ROOT_DOMAIN_NAME }}
+      WWW_DOMAIN_NAME: ${{ secrets.WWW_DOMAIN_NAME }}
+      PROJECT1_DOMAIN: ${{ secrets.PROJECT1_DOMAIN }}
+      PROJECT2_DOMAIN: ${{ secrets.PROJECT2_DOMAIN }}
+      PROJECT3_FRONTEND_DOMAIN: ${{ secrets.PROJECT3_FRONTEND_DOMAIN }}
+      PROJECT3_BACKEND_DOMAIN: ${{ secrets.PROJECT3_BACKEND_DOMAIN }}
+      HOSTED_ZONE_ID: ${{ secrets.HOSTED_ZONE_ID }}
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Validate CloudFormation Templates
+        run: ./validate-templates.sh
+
+      - name: Upload Templates to S3
+        run: |
+          aws s3 sync ./infra/ "s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}" \
+            --exclude "*" --include "*.yml" --delete
+
+      - name: Deploy Master CloudFormation Stack
+        run: |
+          aws cloudformation deploy \
+            --template-file ./infra/MasterNestedStack.yml \
+            --stack-name "$STACK_NAME" \
+            --parameter-overrides \
+              TemplateBucket="$BUCKET_NAME" \
+              TemplatePrefix="$TEMPLATE_PREFIX" \
+              ArtifactBucket="$ARTIFACT_BUCKET" \
+              ECSCluster="$ECS_CLUSTER" \
+              ECSClusterNameParam="$ECSClusterNameParam" \
+              Region="$REGION" \
+              RootDomainName="$ROOT_DOMAIN_NAME" \
+              WWWDomainName="$WWW_DOMAIN_NAME" \
+              Project1Domain="$PROJECT1_DOMAIN" \
+              Project2Domain="$PROJECT2_DOMAIN" \
+              ProjectFrontendEcommDomain="$PROJECT3_FRONTEND_DOMAIN" \
+              ProjectBackendEcommDomain="$PROJECT3_BACKEND_DOMAIN" \
+              HostedZoneId="$HOSTED_ZONE_ID" \
+              Environment="$ENVIRONMENT" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$REGION"

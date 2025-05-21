@@ -3,25 +3,25 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Master Nested Stack to deploy portfolio infrastructure components
 
+Mappings:
+  TagMap:
+    dev:
+      Project: Portfolio
+      Owner: Nelson
+      CreatedBy: CloudFormation
+      CostCenter: DevTeam
+    prod:
+      Project: Portfolio
+      Owner: Nelson
+      CreatedBy: CloudFormation
+      CostCenter: Production
+
 Parameters:
   Environment:
     Type: String
     AllowedValues: [dev, prod]
     Default: dev
     Description: Deployment environment (dev or prod)
-
-  Mappings:
-    TagMap:
-      dev:
-        Project: Portfolio
-        Owner: Nelson
-        CreatedBy: CloudFormation
-        CostCenter: DevTeam
-      prod:
-        Project: Portfolio
-        Owner: Nelson
-        CreatedBy: CloudFormation
-        CostCenter: Production
 
   TemplateBucket:
     Type: String
@@ -35,13 +35,23 @@ Parameters:
   ECSCluster:
     Type: String
     Description: The ECSCluster used on the Launch Template
-  ECSServiceNameParam:
-    Type: String
   ECSClusterNameParam:
     Type: String
   Region:
     Type: String
-  SSLCertificateArn:
+  RootDomainName:
+    Type: String
+  WWWDomainName:
+    Type: String
+  Project1Domain:
+    Type: String
+  Project2Domain:
+    Type: String
+  ProjectFrontendEcommDomain:
+    Type: String
+  ProjectBackendEcommDomain:
+    Type: String
+  HostedZoneId:
     Type: String
 
 Resources:
@@ -63,7 +73,9 @@ Resources:
 
   LoadBalancerStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
+    DependsOn:
+      - VPCStack
+      - CertificateStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LoadBalancer.yml
       Tags:
@@ -77,12 +89,9 @@ Resources:
           Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
-      Parameters:
-        SSLCertificateArn: !Ref SSLCertificateArn
 
   LaunchTemplateStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LaunchTemplate.yml
       Tags:
@@ -117,7 +126,7 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
       Parameters:
-        ECSServiceNameParam: !Ref ECSServiceNameParam
+        ECSServiceNameParam: portfolio-service
         ECSClusterNameParam: !Ref ECSClusterNameParam
         Region: !Ref Region
 
@@ -198,6 +207,55 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  DNSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LoadBalancerStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}dns.yml
+      Parameters:
+        RootDomainName: !Ref RootDomainName
+        WWWDomainName: !Ref WWWDomainName
+        Project1Domain: !Ref Project1Domain
+        Project2Domain: !Ref Project2Domain
+        ProjectFrontendEcommDomain: !Ref ProjectFrontendEcommDomain
+        ProjectBackendEcommDomain: !Ref ProjectBackendEcommDomain
+        HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+
+  CertificateStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}certificate.yml
+      Parameters:
+        RootDomainName: !Ref RootDomainName
+        WWWDomainName: !Ref WWWDomainName
+        Project1DomainName: !Ref Project1Domain
+        Project2DomainName: !Ref Project2Domain
+        ProjectFEDomainName: !Ref ProjectFrontendEcommDomain
+        ProjectBEDomainName: !Ref ProjectBackendEcommDomain
+        HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+
   PipelineStack:
     Type: AWS::CloudFormation::Stack
     DependsOn: ServiceStack
@@ -219,7 +277,6 @@ Resources:
 
   Project1PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: Project1ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project1Pipeline.yml
       Tags:
@@ -239,7 +296,6 @@ Resources:
 
   Project2PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: Project2ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project2Pipeline.yml
       Tags:
@@ -259,7 +315,6 @@ Resources:
 
   Project3PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: ProjectFullStackServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project3Pipeline.yml
       Tags:

@@ -15,7 +15,7 @@ if [[ -z "$REGION" ]]; then
 fi
 
 # === STEP 1: Check/Create S3 Bucket ===
-echo "🔍 Checking if S3 bucket '$BUCKET_NAME' exists..."
+echo "Checking if S3 bucket '$BUCKET_NAME' exists..."
 if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
     echo "Bucket exists: $BUCKET_NAME"
 else
@@ -26,25 +26,28 @@ else
         --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-# === STEP 2: Upload CloudFormation templates ===
-echo "Uploading templates to S3..."
-aws s3 cp ./infra/ s3://"$BUCKET_NAME"/"$TEMPLATE_PREFIX" --recursive --exclude "*" --include "*.yml"
+# === STEP 2: Upload CloudFormation Templates to S3 ===
+echo "Syncing templates to S3..."
+aws s3 sync ./infra/ "s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}" \
+    --exclude "*" \
+    --include "*.yml" \
+    --delete
 
 
-# === STEP 3: Fetch Certificate ARN ===
-echo "Fetching Certificate ARN from us-east-1..."
-CERT_ARN=$(aws cloudformation describe-stacks \
-  --stack-name PortfolioCertificateStack \
-  --region eu-west-1 \
-  --query "Stacks[0].Outputs[?OutputKey=='SSLCertificateArn'].OutputValue" \
-  --output text)
+# # === STEP 3: Fetch Certificate ARN ===
+# echo "Fetching Certificate ARN from us-east-1..."
+# CERT_ARN=$(aws cloudformation describe-stacks \
+#   --stack-name PortfolioCertificateStack \
+#   --region eu-west-1 \
+#   --query "Stacks[0].Outputs[?OutputKey=='SSLCertificateArn'].OutputValue" \
+#   --output text)
 
-if [[ -z "$CERT_ARN" ]]; then
-  echo "Certificate not found. Please deploy certificate.yml first."
-  exit 1
-fi
+# if [[ -z "$CERT_ARN" ]]; then
+#   echo "Certificate not found. Please deploy certificate.yml first."
+#   exit 1
+# fi
 
-echo "Certificate ARN: $CERT_ARN"
+# echo "Certificate ARN: $CERT_ARN"
 
 # === STEP 4: Deploy Master Nested Stack ===
 echo "Deploying Master Stack to $REGION..."
@@ -59,6 +62,13 @@ aws cloudformation deploy \
     ECSClusterNameParam="$ECSClusterNameParam" \
     Region="$REGION" \
     SSLCertificateArn="$CERT_ARN" \
+    RootDomainName="$ROOT_DOMAIN_NAME" \
+    WWWDomainName="$WWW_DOMAIN_NAME" \
+    Project1Domain="$PROJECT1_DOMAIN" \
+    Project2Domain="$PROJECT2_DOMAIN" \
+    ProjectFrontendEcommDomain="$PROJECT_FRONTEND_ECOMM_DOMAIN" \
+    ProjectBackendEcommDomain="$PROJECT_BACKEND_ECOMM_DOMAIN" \
+    HostedZoneId="$HOSTED_ZONE_ID" \
     Environment="$ENVIRONMENT" \ 
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION"

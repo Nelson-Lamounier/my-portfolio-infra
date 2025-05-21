@@ -79,7 +79,7 @@ Resources:
         HostedZoneId: !ImportValue LoadBalancerHostedZoneId
 
     # A record for api.lamounierdigital.com
-  ProjectFrontendEcommDNSRecord:
+  ProjectBackendEcommDNSRecord:
     Type: AWS::Route53::RecordSet
     Properties:
       HostedZoneId: !Ref HostedZoneId
@@ -88,5 +88,3 @@ Resources:
       AliasTarget:
         DNSName: !ImportValue LoadBalancerDNS
         HostedZoneId: !ImportValue LoadBalancerHostedZoneId
-
-  

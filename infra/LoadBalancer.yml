@@ -3,10 +3,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Master Nested Stack to deploy portfolio infrastructure components
 
-Parameters:
-  SSLCertificateArn:
-    Type: String
-    Description: ARN of the ACM SSL certificate to use for HTTPS
+# Parameters:
+#   # SSLCertificateArn:
+#   #   Type: String
+#   #   Description: ARN of the ACM SSL certificate to use for HTTPS
 
 Resources:
   LoadBalancerSG:
@@ -135,7 +135,7 @@ Resources:
       Port: 443
       Protocol: HTTPS
       Certificates:
-        - CertificateArn: !Ref SSLCertificateArn
+        - CertificateArn: !ImportValue SSLCertificateArn
       DefaultActions:
         - Type: fixed-response
           FixedResponseConfig:

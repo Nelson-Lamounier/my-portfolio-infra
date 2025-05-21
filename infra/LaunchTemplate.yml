@@ -13,9 +13,9 @@ Parameters:
     Type: String
     Description: Name of the ECS Cluster for this EC2 instance
 
-  PublicSubnetId:
-    Type: AWS::EC2::Subnet::Id
-    Description: The public subnet to launch the EC2 instance into
+  # PublicSubnetId:
+  #   Type: AWS::EC2::Subnet::Id
+  #   Description: The public subnet to launch the EC2 instance into
 
 Resources:
   ECSInstanceRole:

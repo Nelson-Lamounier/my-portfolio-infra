@@ -59,6 +59,7 @@ Resources:
 
 Outputs:
   SSLCertificateArn:
+    Description: The ARN of the ACM certificate
     Value: !Ref SSLCertificate
     Export:
       Name: SSLCertificateArn
