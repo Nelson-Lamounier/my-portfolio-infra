@@ -25,7 +25,7 @@ Resources:
       Memory: 256
       RequiresCompatibilities:
         - EC2
-      NetworkMode: awsvpc
+      NetworkMode: bridge # Changed from awsvpc to bridge
       ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
       ContainerDefinitions:
         - Name: project1-container
@@ -35,6 +35,7 @@ Resources:
           Essential: true
           PortMappings:
             - ContainerPort: 3000
+              HostPort: 3000 #  Explicit HostPort to match ALB TargetGroup
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -54,13 +55,6 @@ Resources:
         - ContainerName: project1-container
           ContainerPort: 3000
           TargetGroupArn: !ImportValue Project1TargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !ImportValue TaskSecurityGroup
       EnableECSManagedTags: true
       DeploymentController:
         Type: ECS

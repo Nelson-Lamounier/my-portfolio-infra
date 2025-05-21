@@ -101,13 +101,6 @@ Resources:
         - ContainerName: app-container
           ContainerPort: 80
           TargetGroupArn: !ImportValue TargetGroupArn
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets:
-            - !ImportValue PublicSubnet1
-            - !ImportValue PublicSubnet2
-          SecurityGroups:
-            - !Ref TaskSecurityGroup
       EnableECSManagedTags: true
       DeploymentController:
         Type: ECS
