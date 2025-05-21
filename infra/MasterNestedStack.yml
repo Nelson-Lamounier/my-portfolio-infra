@@ -4,6 +4,25 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Master Nested Stack to deploy portfolio infrastructure components
 
 Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Default: dev
+    Description: Deployment environment (dev or prod)
+
+  Mappings:
+    TagMap:
+      dev:
+        Project: Portfolio
+        Owner: Nelson
+        CreatedBy: CloudFormation
+        CostCenter: DevTeam
+      prod:
+        Project: Portfolio
+        Owner: Nelson
+        CreatedBy: CloudFormation
+        CostCenter: Production
+
   TemplateBucket:
     Type: String
     Description: S3 Bucket containing the nested templates
@@ -32,17 +51,32 @@ Resources:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}VPC.yml
       Tags:
         - Key: Project
-          Value: Portfolio
-        - Key: Environment
-          Value: Dev
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
         - Key: Owner
-          Value: Nelson
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
 
   LoadBalancerStack:
     Type: AWS::CloudFormation::Stack
     DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LoadBalancer.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         SSLCertificateArn: !Ref SSLCertificateArn
 
@@ -51,6 +85,17 @@ Resources:
     DependsOn: VPCStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LaunchTemplate.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ECSCluster: !Ref ECSCluster
         PublicSubnetId: !GetAtt VPCStack.Outputs.PublicSubnet1
@@ -60,6 +105,17 @@ Resources:
     DependsOn: LoadBalancerStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Service.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ECSServiceNameParam: !Ref ECSServiceNameParam
         ECSClusterNameParam: !Ref ECSClusterNameParam
@@ -69,6 +125,17 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Service.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ECSServiceNameParam: project1-service
         ECSClusterNameParam: !Ref ECSClusterNameParam
@@ -78,6 +145,17 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project2Service.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ECSServiceNameParam: project2-service
         ECSClusterNameParam: !Ref ECSClusterNameParam
@@ -87,6 +165,17 @@ Resources:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}ProjectFullStackService.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ECSServiceNameParam: ecom-fullstack-service
         ECSClusterNameParam: !Ref ECSClusterNameParam
@@ -97,12 +186,34 @@ Resources:
     DependsOn: LaunchTemplateStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}AutoScalingGroup.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
 
   PipelineStack:
     Type: AWS::CloudFormation::Stack
     DependsOn: ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}DeploymentPipeline.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
 
@@ -111,6 +222,17 @@ Resources:
     DependsOn: Project1ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Pipeline.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         Project1ServiceName: !GetAtt Project1ServiceStack.Outputs.Project1ECSServiceName
@@ -120,6 +242,17 @@ Resources:
     DependsOn: Project2ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project2Pipeline.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         Project2ServiceName: !GetAtt Project2ServiceStack.Outputs.Project2ECSServiceName
@@ -129,6 +262,17 @@ Resources:
     DependsOn: ProjectFullStackServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project3Pipeline.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ProjectEcommServiceName: !GetAtt ProjectFullStackServiceStack.Outputs.ProjectFullStackECSServiceName
