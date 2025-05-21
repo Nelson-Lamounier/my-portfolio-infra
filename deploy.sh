@@ -59,6 +59,7 @@ aws cloudformation deploy \
     ECSClusterNameParam="$ECSClusterNameParam" \
     Region="$REGION" \
     SSLCertificateArn="$CERT_ARN" \
+    Environment="$ENVIRONMENT" \ 
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION"
 

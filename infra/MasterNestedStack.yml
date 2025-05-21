@@ -104,7 +104,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: LoadBalancerStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Service.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Service.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -124,7 +124,7 @@ Resources:
   Project1ServiceStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Service.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Project1Service.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -144,7 +144,7 @@ Resources:
   Project2ServiceStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project2Service.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Project2Service.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -164,7 +164,7 @@ Resources:
   ProjectFullStackServiceStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}ProjectFullStackService.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/ProjectFullStackService.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -202,7 +202,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: ServiceStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}DeploymentPipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DeploymentPipeline.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -221,7 +221,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: Project1ServiceStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project1Pipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project1Pipeline.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -241,7 +241,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: Project2ServiceStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project2Pipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project2Pipeline.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -261,7 +261,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: ProjectFullStackServiceStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}Project3Pipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project3Pipeline.yml
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
