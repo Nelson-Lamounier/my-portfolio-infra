@@ -8,6 +8,10 @@ Parameters:
     Type: String
     Description: "S3 bucket used to store buildand deployment"
 
+  ECSServiceName:
+    Type: String
+    Description: "Name of the ECS service to update"
+
 Resources:
   CodeBuildRole:
     Type: AWS::IAM::Role
@@ -111,43 +115,67 @@ Resources:
                   - !Sub arn:aws:s3:::${ArtifactBucket}
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
 
-        - PolicyName: CodePipelineCodeBuildAndECSAccess
+        - PolicyName: CodePipelineECSAccess
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # Core ECS deployment permissions
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DescribeClusters
+                  - ecs:ListClusters
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:CreteService
+                  - ecs:DeleteService
+                  - ecs:ListServices
+                  - ecs:ListTaskDefinition
+                  - ecs:RunTask
+                  - ecs:StopTask
+                Resource: "*"
+
+              # additional ECS permissions
+              - Effect: Allow
+                Action:
+                  - ecs:TagResource
+                  - ecs:UntagResource
+                  - ecs:ListTagsForResource
+                resource: "*"
+
+                # Application auto-scaling permissions
+              - Effect: Allow
+                Action:
+                  - application-autoscaling:*
+                Resource: "*"
+
+              # CloudWatch permissions
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+
+                # Codebuild permissions
               - Effect: Allow
                 Action:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                   - codebuild:BatchGetProjects
-                  - ecs:RegisterTaskDefinition
-                  - ecs:UpdateService
-                  - ecs:DescribeServices
-                  - ecs:ListClusters
-                  - ecs:DescribeTaskDefinition
-                  - ecs:DescribeClusters
-                Resource: "*"
-        - PolicyName: ECSFullAccessForDeploy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecs:DescribeServices
-                  - ecs:UpdateService
-                  - ecs:DescribeTaskDefinition
-                  - ecs:RegisterTaskDefinition
-                  - ecs:DescribeClusters
-                  - iam:PassRole # critical if ECS task role is being updated
                 Resource: "*"
 
-        - PolicyName: CodePipelinePassRole
+        - PolicyName: CodePipelineIAMPassRole
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action: iam:PassRole
-                Resource: !ImportValue TaskExecutionRoleArn
+                Resource:
+                  - !ImportValue TaskExecutionRoleArn
 
         - PolicyName: CodePipelineSourceAccess
           PolicyDocument:
@@ -207,5 +235,5 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ClusterName: !ImportValue ECSClusterName
-                ServiceName: !ImportValue ECSServiceName
+                ServiceName: !Ref ECSServiceName
                 FileName: imagedefinitions.json

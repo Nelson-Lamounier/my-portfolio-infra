@@ -41,7 +41,7 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-group: /ecs/portfolio-task
-              awslogs-region: !Ref "AWS::Region"
+              awslogs-region: !Ref Region
               awslogs-stream-prefix: ecs
 
   ECSService:
@@ -66,15 +66,6 @@ Resources:
 
 Outputs:
   ECSServiceName:
-    Value: !Ref ECSServiceNameParam
+    Value: !Ref ECSService
     Export:
       Name: ECSServiceName
-
-  TaskDefinitionName:
-    Value: !Ref TaskDefinition
-    Export:
-      Name: TaskDefinitionName
-
-  ForceUpdate:
-    Description: Dummy output to force stack update
-    Value: "1"
