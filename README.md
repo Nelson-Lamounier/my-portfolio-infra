@@ -117,6 +117,151 @@ Each project uses a dedicated CI/CD pipeline via:
 
 ---
 
+# CloudFormation Intrinsic Functions Cheat Sheet
+
+This guide documents the most important AWS CloudFormation intrinsic functions used across this infrastructure-as-code project. It serves as a quick reference for understanding how resource values, properties, and cross-stack references are managed.
+
+---
+
+## `!Ref` – Get the Resource Name or Parameter Value
+
+Returns:
+
+- Parameter value (if used on `Parameters`)
+- Physical resource ID (if used on `Resources`)
+
+**Example:**
+
+```yaml
+InstanceType: !Ref MyInstanceTypeParameter
+BucketName: !Ref MyS3Bucket
+```
+
+---
+
+## `!GetAtt` – Get an Attribute of a Resource
+
+Used to retrieve **attributes** like `Arn`, `DnsName`, `PublicIp`, etc.
+
+**Example:**
+
+```yaml
+BucketArn: !GetAtt MyS3Bucket.Arn
+LoadBalancerDNS: !GetAtt MyLoadBalancer.DNSName
+```
+
+---
+
+## `!ImportValue` – Import Exported Output From Another Stack
+
+Used for **cross-stack referencing** when another stack has exported an output.
+
+**Example:**
+
+```yaml
+VpcId: !ImportValue SharedVpcId
+TargetGroupArn: !ImportValue Project1TargetGroupArn
+```
+
+> Make sure the source stack uses:
+>
+> ```yaml
+> Export:
+>   Name: SharedVpcId
+> ```
+
+---
+
+## `!Sub` – Substitute Variables Into Strings
+
+Injects variable values inside strings using `${}` syntax.
+
+**Example:**
+
+```yaml
+!Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/my-image:latest"
+```
+
+---
+
+## `!Join` – Concatenate Strings
+
+Combines multiple strings or values into a single string.
+
+**Example:**
+
+```yaml
+!Join ["-", ["my-app", !Ref "Environment"]]
+```
+
+---
+
+## `!Split` – Split String Into List
+
+Splits a string by a delimiter into a list.
+
+**Example:**
+
+```yaml
+!Select [0, !Split [",", "a,b,c"]]
+```
+
+---
+
+## `!If`, `!Equals`, `!Not`, `!And`, `!Or` – Conditional Logic
+
+Used for conditionally including resources or values.
+
+**Example:**
+
+```yaml
+Conditions:
+  IsProd: !Equals [!Ref Environment, "production"]
+```
+
+---
+
+## Common Use Case Matrix
+
+| Use Case                            | Use...                 |
+| ----------------------------------- | ---------------------- |
+| Get a parameter's value             | `!Ref`                 |
+| Get a resource's name or ID         | `!Ref`                 |
+| Get a resource's property           | `!GetAtt`              |
+| Reference output from another stack | `!ImportValue`         |
+| Build ECR or ALB DNS strings        | `!Sub`                 |
+| Join words into a resource name     | `!Join`                |
+| Condition-based deployment logic    | `!If`, `!Equals`, etc. |
+
+---
+
+## Tip
+
+Use `!ImportValue` + `!Sub` together to dynamically build ARNs or hostnames across stacks.
+
+**Example:**
+
+```yaml
+!Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}"
+```
+
+---
+
+## Found in Use
+
+These functions are used throughout:
+
+- `LaunchTemplate.yml`
+- `ServiceStack.yml`
+- `LoadBalancer.yml`
+- `Pipeline.yml`
+- `MasterNestedStack.yml`
+
+---
+
+For further reference, see:
+[AWS CloudFormation Intrinsic Functions](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference.html)
+
 ## Skills Demonstrated
 
 - AWS CloudFormation (modular, reusable stacks)

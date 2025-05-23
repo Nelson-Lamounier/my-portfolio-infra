@@ -65,9 +65,8 @@ Resources:
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
-    DeletionPolicy: Retain
     Properties:
-      Name: Project1CodeBuildV5
+      Name: Project1CodeBuild
       Source:
         Type: CODEPIPELINE
       Artifacts:

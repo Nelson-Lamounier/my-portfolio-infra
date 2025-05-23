@@ -158,5 +158,5 @@ Resources:
                 - Name: BuildOutput
               Configuration:
                 ClusterName: !ImportValue ECSClusterName
-                ServiceName: !Ref ProjectFullStackECSServiceName
+                ServiceName: !Ref ProjectEcommServiceName
                 FileName: imagedefinitions.json

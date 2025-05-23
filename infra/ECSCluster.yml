@@ -1,0 +1,76 @@
+# @format
+
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  Region:
+    Type: String
+  ECSClusterNameParam:
+    Type: String
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ECSClusterNameParam
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inboud access to ECS tasks
+      VpcId: !ImportValue VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3001
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3002
+          ToPort: 3002
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          CidrIp: 0.0.0.0/0
+
+Outputs:
+  ECSClusterName:
+    Value: !Ref ECSCluster
+    Export:
+      Name: ECSClusterName
+
+  TaskExecutionRoleArn:
+    Description: ARN of the ECS task execution role
+    Value: !GetAtt TaskExecutionRole.Arn
+    Export:
+      Name: TaskExecutionRoleArn
+
+  TaskSecurityGroup:
+    Value: !Ref TaskSecurityGroup
+    Export:
+      Name: TaskSecurityGroup

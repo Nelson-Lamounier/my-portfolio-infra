@@ -11,24 +11,6 @@ Parameters:
     Type: String
 
 Resources:
-  ECSCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: !Ref ECSClusterNameParam
-
-  TaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -39,17 +21,17 @@ Resources:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: portfolio-task
-      Cpu: 512
-      Memory: 1024
+      Cpu: 256
+      Memory: 512
       RequiresCompatibilities:
         - EC2
       NetworkMode: bridge #Changed from awsvpc to bridge
-      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
       ContainerDefinitions:
         - Name: app-container
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/portfolio-dev:latest"
-          Cpu: 512
-          MemoryReservation: 1024
+          Cpu: 256
+          MemoryReservation: 512
           Essential: true
           PortMappings:
             - ContainerPort: 80
@@ -62,38 +44,11 @@ Resources:
               awslogs-region: !Ref "AWS::Region"
               awslogs-stream-prefix: ecs
 
-  TaskSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Allow inboud access to ECS tasks
-      VpcId: !ImportValue VPC
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3000
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 3001
-          ToPort: 3001
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 3002
-          ToPort: 3002
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 4000
-          ToPort: 4000
-          CidrIp: 0.0.0.0/0
-
   ECSService:
     Type: AWS::ECS::Service
     Properties:
       ServiceName: !Ref ECSServiceNameParam
-      Cluster: !Ref ECSCluster
+      Cluster: !ImportValue ECSClusterName
       DesiredCount: 1
       LaunchType: EC2
       TaskDefinition: !Ref TaskDefinition
@@ -110,26 +65,10 @@ Resources:
         MinimumHealthyPercent: 0
 
 Outputs:
-  ECSClusterName:
-    Value: !Ref ECSCluster
-    Export:
-      Name: ECSClusterName
-
   ECSServiceName:
     Value: !Ref ECSServiceNameParam
     Export:
       Name: ECSServiceName
-
-  TaskExecutionRoleArn:
-    Description: ARN of the ECS task execution role
-    Value: !GetAtt TaskExecutionRole.Arn
-    Export:
-      Name: TaskExecutionRoleArn
-
-  TaskSecurityGroup:
-    Value: !Ref TaskSecurityGroup
-    Export:
-      Name: TaskSecurityGroup
 
   TaskDefinitionName:
     Value: !Ref TaskDefinition

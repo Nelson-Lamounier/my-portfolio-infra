@@ -9,13 +9,13 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
 
-  ECSCluster:
+  ECSClusterNameParam:
     Type: String
     Description: Name of the ECS Cluster for this EC2 instance
 
-  # PublicSubnetId:
-  #   Type: AWS::EC2::Subnet::Id
-  #   Description: The public subnet to launch the EC2 instance into
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: The public subnet to launch the EC2 instance into
 
 Resources:
   ECSInstanceRole:
@@ -50,6 +50,10 @@ Resources:
           ToPort: 80
           CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
@@ -80,7 +84,7 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+            echo ECS_CLUSTER=${ECSClusterNameParam} >> /etc/ecs/ecs.config
             echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
             mkdir -p /data/docker
             echo "OPTIONS=\"--data-root=/data/docker\"" >> /etc/docker/daemon.json

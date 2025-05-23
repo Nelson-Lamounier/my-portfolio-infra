@@ -125,6 +125,20 @@ Resources:
                   - ecs:DescribeServices
                   - ecs:ListClusters
                   - ecs:DescribeTaskDefinition
+                  - ecs:DescribeClusters
+                Resource: "*"
+        - PolicyName: ECSFullAccessForDeploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DescribeClusters
+                  - iam:PassRole # critical if ECS task role is being updated
                 Resource: "*"
 
         - PolicyName: CodePipelinePassRole
@@ -132,9 +146,8 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action:
-                  - iam:PassRole
-                Resource: "*"
+                Action: iam:PassRole
+                Resource: !ImportValue TaskExecutionRoleArn
 
         - PolicyName: CodePipelineSourceAccess
           PolicyDocument:

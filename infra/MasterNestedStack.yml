@@ -32,9 +32,6 @@ Parameters:
   ArtifactBucket:
     Type: String
     Description: The S3 bucket used to store build artifacts
-  ECSCluster:
-    Type: String
-    Description: The ECSCluster used on the Launch Template
   ECSClusterNameParam:
     Type: String
   Region:
@@ -92,6 +89,7 @@ Resources:
 
   LaunchTemplateStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: ECSClusterStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LaunchTemplate.yml
       Tags:
@@ -106,12 +104,32 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
       Parameters:
-        ECSCluster: !Ref ECSCluster
+        ECSClusterNameParam: !Ref ECSClusterNameParam
         PublicSubnetId: !GetAtt VPCStack.Outputs.PublicSubnet1
+
+  ECSClusterStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LoadBalancerStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}ECSCluster.yml
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+      Parameters:
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        Region: !Ref Region
 
   ServiceStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: LoadBalancerStack
+    DependsOn: ECSClusterStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Service.yml
       Tags:
@@ -132,6 +150,7 @@ Resources:
 
   Project1ServiceStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: ECSClusterStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Project1Service.yml
       Tags:
@@ -152,6 +171,7 @@ Resources:
 
   Project2ServiceStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: ECSClusterStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Project2Service.yml
       Tags:
@@ -172,6 +192,7 @@ Resources:
 
   ProjectFullStackServiceStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: ECSClusterStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/ProjectFullStackService.yml
       Tags:
@@ -186,7 +207,7 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
       Parameters:
-        ECSServiceNameParam: ecom-fullstack-service
+        ECSServiceNameParam: fullstack-ecomm-service
         ECSClusterNameParam: !Ref ECSClusterNameParam
         Region: !Ref Region
 
@@ -277,6 +298,7 @@ Resources:
 
   Project1PipelineStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: Project1ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project1Pipeline.yml
       Tags:
@@ -296,6 +318,7 @@ Resources:
 
   Project2PipelineStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: Project2ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project2Pipeline.yml
       Tags:
@@ -315,6 +338,7 @@ Resources:
 
   Project3PipelineStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: ProjectFullStackServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project3Pipeline.yml
       Tags:

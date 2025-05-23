@@ -14,6 +14,13 @@ if [[ -z "$REGION" ]]; then
   exit 1
 fi
 
+REQUIRED_VARS=(
+  BUCKET_NAME TEMPLATE_PREFIX ARTIFACT_BUCKET ECS_CLUSTER
+  ECSClusterNameParam PORTFOLIO_SERVICE_NAME STACK_NAME REGION ENVIRONMENT
+  ROOT_DOMAIN_NAME WWW_DOMAIN_NAME PROJECT1_DOMAIN PROJECT2_DOMAIN
+  PROJECT3_FRONTEND_DOMAIN PROJECT3_BACKEND_DOMAIN HOSTED_ZONE_ID
+)
+
 # === STEP 1: Check/Create S3 Bucket ===
 echo "Checking if S3 bucket '$BUCKET_NAME' exists..."
 if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
@@ -58,18 +65,16 @@ aws cloudformation deploy \
     TemplateBucket="$BUCKET_NAME" \
     TemplatePrefix="$TEMPLATE_PREFIX" \
     ArtifactBucket="$ARTIFACT_BUCKET" \
-    ECSCluster="$ECS_CLUSTER" \
-    ECSClusterNameParam="$ECSClusterNameParam" \
+    ECSClusterNameParam="$ECS_CLUSTER" \
     Region="$REGION" \
-    SSLCertificateArn="$CERT_ARN" \
     RootDomainName="$ROOT_DOMAIN_NAME" \
     WWWDomainName="$WWW_DOMAIN_NAME" \
     Project1Domain="$PROJECT1_DOMAIN" \
     Project2Domain="$PROJECT2_DOMAIN" \
-    ProjectFrontendEcommDomain="$PROJECT_FRONTEND_ECOMM_DOMAIN" \
-    ProjectBackendEcommDomain="$PROJECT_BACKEND_ECOMM_DOMAIN" \
+    ProjectFrontendEcommDomain="$PROJECT3_FRONTEND_DOMAIN" \
+    ProjectBackendEcommDomain="$PROJECT3_BACKEND_DOMAIN" \
     HostedZoneId="$HOSTED_ZONE_ID" \
-    Environment="$ENVIRONMENT" \ 
+    Environment="$ENVIRONMENT" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION"
 
