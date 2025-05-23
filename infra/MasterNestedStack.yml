@@ -295,6 +295,7 @@ Resources:
           Value: !Ref Environment
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
+        ECSServiceName: !GetAtt ServiceStack.Outputs.ECSServiceName
 
   Project1PipelineStack:
     Type: AWS::CloudFormation::Stack

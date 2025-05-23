@@ -46,7 +46,7 @@ Resources:
   Project2ECSService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: project2-service
+      ServiceName: !Ref ECSServiceNameParam
       Cluster: !ImportValue ECSClusterName
       DesiredCount: 1
       LaunchType: EC2
