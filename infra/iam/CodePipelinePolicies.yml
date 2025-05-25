@@ -1,0 +1,223 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  Reusable CodePipeline IAM Role and Policies Template
+
+  This template creates a standardized IAM role with comprehensive permissions for CodePipeline
+  to orchestrate CI/CD workflows including source control integration, build orchestration,
+  and ECS deployments.
+
+  The role enables CodePipeline to:
+  - Pull source code from GitHub via CodeStar connections
+  - Trigger and monitor CodeBuild projects
+  - Deploy containerized applications to ECS services
+  - Manage artifacts through S3 storage
+  - Access deployment configuration from SSM Parameter Store
+
+Parameters:
+  ArtifactBucket:
+    Type: String
+    Description: |
+      S3 bucket name for storing CodePipeline artifacts between stages.
+      This bucket acts as the central storage for source code, build outputs,
+      and deployment artifacts as they flow through the pipeline stages.
+
+  ProjectName:
+    Type: String
+    Description: |
+      Unique project identifier for creating distinct role names across multiple pipelines.
+      Examples: 'Portfolio', 'Project1', 'EcommerceApp'
+      Used to prevent naming conflicts when deploying multiple pipeline stacks.
+
+  ConnectionArn:
+    Type: String
+    Description: |
+      ARN of the CodeStar connection for GitHub integration.
+      This connection enables secure, token-based authentication between AWS and GitHub
+      without storing credentials directly in the pipeline configuration.
+      Format: arn:aws:codeconnections:region:account:connection/connection-id
+
+Resources:
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # Unique role naming prevents conflicts between multiple project pipelines
+      RoleName: !Sub ${ProjectName}-CodePipelineRole
+
+      # Trust relationship: Allow CodePipeline service to assume this role during execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+        # SSM Parameter Access: Secure retrieval of sensitive configuration values
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Retrieve GitHub personal access token for repository access
+                  - ssm:GetParameter
+                Resource:
+                  # GitHub token used for repository operations and webhook configuration
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
+
+        # S3 Artifact Management: Handle pipeline artifacts and intermediate files
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject # Download artifacts from previous pipeline stages
+                  - s3:PutObject # Store artifacts for subsequent stages
+                  - s3:ListBucket # Browse bucket contents for artifact discovery
+                Resource:
+                  # Scoped to specific artifact bucket to follow least privilege principle
+                  - !Sub arn:aws:s3:::${ArtifactBucket}
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+
+        # ECS Deployment Permissions: Complete access for container application deployments
+        - PolicyName: ECSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Core ECS Operations: Service and task management for deployments
+              - Effect: Allow
+                Action:
+                  # Service Management: Required for updating running applications
+                  - ecs:DescribeServices # Check current service status and configuration
+                  - ecs:UpdateService # Deploy new task definitions to services
+                  - ecs:CreateService # Create new services during initial deployment
+                  - ecs:DeleteService # Remove services during cleanup operations
+                  - ecs:ListServices # Discover existing services in cluster
+
+                  # Task Definition Management: Handle application container specifications
+                  - ecs:DescribeTaskDefinition # Read current task definition details
+                  - ecs:RegisterTaskDefinition # Register new versions with updated images
+                  - ecs:ListTaskDefinitions # Browse available task definition versions
+
+                  # Cluster Operations: Manage deployment targets
+                  - ecs:DescribeClusters # Verify cluster exists and is healthy
+                  - ecs:ListClusters # Discover available deployment targets
+
+                  # Task Runtime Management: Monitor and control running containers
+                  - ecs:ListTasks # Monitor running tasks during deployment
+                  - ecs:DescribeTasks # Get detailed task status and health
+                  - ecs:RunTask # Execute one-off tasks (migrations, etc.)
+                  - ecs:StopTask # Terminate unhealthy or old tasks
+
+                  # Resource Tagging: Organize and track deployed resources
+                  - ecs:TagResource # Apply tags to ECS resources
+                  - ecs:UntagResource # Remove outdated tags
+                  - ecs:ListTagsForResource # Audit current resource tags
+                # Global resource access needed due to ECS cross-service dependencies
+                Resource: "*"
+
+              # Auto Scaling Integration: Handle dynamic capacity adjustments
+              - Effect: Allow
+                Action:
+                  # Full auto scaling permissions for ECS service scaling policies
+                  - application-autoscaling:*
+                # Auto scaling policies can be applied to various resource types
+                Resource: "*"
+
+              # CloudWatch Logs: Monitor deployment process and application logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup # Create log groups for new applications
+                  - logs:DescribeLogGroups # Verify log group configuration
+                  - logs:PutLogEvents # Write deployment events to logs
+                  - logs:DescribeLogStreams # Monitor log stream creation and status
+                # Log group names are dynamic and managed by ECS service
+                Resource: "*"
+
+              # CodeBuild Integration: Orchestrate build processes within pipeline
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild # Trigger build projects for compilation/testing
+                  - codebuild:BatchGetBuilds # Monitor build progress and status
+                  - codebuild:BatchGetProjects # Validate build project configuration
+                # Build projects may be created dynamically across multiple projects
+                Resource: "*"
+
+        # IAM Role Passing: Enable ECS to use task execution roles for container operations
+        - PolicyName: IAMPassRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Allow CodePipeline to pass execution roles to ECS tasks
+                  - iam:PassRole
+                Resource:
+                  # Specific task execution role created by ECS cluster infrastructure
+                  # This role is used by ECS to pull container images and write logs
+                  - !ImportValue TaskExecutionRoleArn
+
+        # Source Control Integration: Secure access to GitHub repositories
+        - PolicyName: SourceAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Use existing CodeStar connection for repository operations
+                  - codestar-connections:UseConnection
+                  # Pass connection credentials to CodePipeline service actions
+                  - codestar-connections:PassConnection
+                # Scoped to specific connection to prevent unauthorized repository access
+                Resource: !Ref ConnectionArn
+
+Outputs:
+  CodePipelineRoleArn:
+    Description: |
+      ARN of the created CodePipeline IAM role.
+
+      This role ARN is consumed by pipeline templates to grant CodePipeline
+      the necessary permissions for end-to-end CI/CD operations.
+
+      The role enables secure, automated deployments while maintaining
+      the principle of least privilege through scoped permissions.
+    Value: !GetAtt CodePipelineRole.Arn
+    Export:
+      # Project-specific export name prevents conflicts between multiple pipeline stacks
+      # Format: {ProjectName}-CodePipelineRoleArn (e.g., Portfolio-CodePipelineRoleArn)
+      Name: !Sub ${ProjectName}-CodePipelineRoleArn
+# Template Usage and Maintenance Notes:
+#
+# 1. Security Best Practices:
+#    - Role follows principle of least privilege with scoped permissions
+#    - Connection ARNs prevent unauthorized repository access
+#    - SSM parameters provide secure credential storage
+#    - IAM PassRole is limited to specific execution roles
+#
+# 2. Deployment Prerequisites:
+#    - CodeStar connection must be established and approved in GitHub
+#    - SSM parameter for GitHub token must exist with proper encryption
+#    - Task execution role must be exported from ECS infrastructure stack
+#    - S3 artifact bucket must be created before pipeline deployment
+#
+# 3. Permission Scope Considerations:
+#    - ECS permissions use "*" resources due to cross-service dependencies
+#    - Application auto scaling requires broad permissions for dynamic scaling
+#    - CloudWatch logs permissions accommodate dynamic log group creation
+#    - CodeBuild permissions support multiple projects within the account
+#
+# 4. Troubleshooting Common Issues:
+#    - Connection failures: Verify CodeStar connection status in AWS Console
+#    - ECS deployment errors: Check task execution role permissions and exports
+#    - S3 access denied: Confirm artifact bucket name matches parameter value
+#    - Build failures: Verify CodeBuild project names and permissions
+#
+# 5. Monitoring and Auditing:
+#    - Use CloudTrail to monitor role usage and permission effectiveness
+#    - Review IAM Access Analyzer findings for permission optimization
+#    - Monitor CloudWatch logs for permission-related deployment failures
+#    - Regularly audit SSM parameter access patterns
