@@ -1,0 +1,228 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  Dynamic ECS Service and Task Definition Template
+
+  This reusable template creates ECS services for any project application.
+  It provides consistent configuration while allowing project-specific customization
+  through parameters. Each service includes:
+
+  - Project-specific task definition with configurable resources
+  - ECS service with load balancer integration
+  - CloudWatch logging with project-specific log groups
+  - Flexible container and port configuration
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: |
+      Unique identifier for the project (e.g., 'Portfolio', 'Project1', 'Project2').
+      Used to create unique resource names and avoid conflicts between services.
+      Should match the naming convention used throughout your infrastructure.
+
+  ServiceName:
+    Type: String
+    Description: |
+      Name for the ECS service within the cluster.
+      Will be used as the service identifier and for monitoring purposes.
+      Example: 'portfolio-service', 'project1-service'
+
+  ContainerName:
+    Type: String
+    Description: |
+      Name of the primary container within the task definition.
+      Must match the container name expected by CI/CD pipelines for deployments.
+      Example: 'app-container', 'project1-container'
+
+  ECRRepository:
+    Type: String
+    Description: |
+      Name of the ECR repository containing the container image.
+      Repository must exist and contain a valid image tagged as 'latest'.
+      Example: 'portfolio-dev', 'project1-repo'
+
+  ContainerPort:
+    Type: Number
+    Description: |
+      Port that the application listens on inside the container.
+      This is the port exposed by your application (e.g., Express.js on 3000).
+    Default: 80
+
+  HostPort:
+    Type: Number
+    Description: |
+      Port on the EC2 host that maps to the container port.
+      Must be unique across all services on the same EC2 instance.
+      Used by ALB target groups for health checks and traffic routing.
+    Default: 8080
+
+  CPU:
+    Type: Number
+    Description: |
+      CPU units allocated to the task (1024 units = 1 vCPU).
+      Adjust based on application requirements and expected load.
+    Default: 256
+
+  Memory:
+    Type: Number
+    Description: |
+      Memory in MB allocated to the task.
+      Should be sized based on application memory usage patterns.
+    Default: 512
+
+  DesiredCount:
+    Type: Number
+    Description: |
+      Number of tasks to maintain running for this service.
+      Start with 1 for development, increase for production availability.
+    Default: 1
+
+  TargetGroupArn:
+    Type: String
+    Description: |
+      ARN of the ALB target group for this service.
+      Each service should have its own target group for proper routing.
+      Target group must be configured with appropriate health check settings.
+
+  Region:
+    Type: String
+    Description: |
+      AWS region for resource deployment.
+      Used for ECR repository URLs and CloudWatch log configuration.
+
+  MigrationMode:
+    Type: String
+    Description: Migration mode to handle existing log groups
+    Default: "new"
+    AllowedValues: ["new", "migrate", "cleanup"]
+
+Conditions:
+  CreateNewLogGroup: !Equals [!Ref MigrationMode, "new"]
+  MigrateExisting: !Equals [!Ref MigrationMode, "migrate"]
+
+Resources:
+  # CloudWatch Log Group: Project-specific logging
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateNewLogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}-${ServiceName}" # More unique naming
+      RetentionInDays: 7 # Adjust for production needs
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: Logging
+
+  # Task Definition: Container blueprint with project-specific configuration
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-${ServiceName}-task" # More unique family name
+      Cpu: !Ref CPU # Configurable CPU allocation
+      Memory: !Ref Memory # Configurable memory allocation
+      RequiresCompatibilities:
+        - EC2 # Use EC2 launch type
+      NetworkMode: bridge # Bridge networking for cost efficiency
+      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn # Shared execution role
+
+      ContainerDefinitions:
+        - Name: !Ref ContainerName # Project-specific container name
+          # Dynamic ECR image URL based on project parameters
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
+          Cpu: !Ref CPU # Container CPU allocation
+          MemoryReservation: !Ref Memory # Soft memory limit
+          Essential: true # Critical container for task health
+
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort # Application port inside container
+              HostPort: !Ref HostPort # Unique host port for ALB routing
+              Protocol: tcp # TCP protocol for HTTP traffic
+
+          # Project-specific CloudWatch logging
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              # Use conditional log group naming
+              awslogs-group: !If
+                - CreateNewLogGroup
+                - !Sub "/ecs/${ProjectName}-${ServiceName}"
+                - !Sub "/ecs/portfolio-task" # Use existing during migration
+              awslogs-region: !Ref Region
+              awslogs-stream-prefix: ecs
+
+  # ECS Service: Manages running tasks with project-specific configuration
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Ref ServiceName # Project-specific service name
+      Cluster: !ImportValue ECSClusterName # Shared ECS cluster
+      DesiredCount: !Ref DesiredCount # Configurable task count
+      LaunchType: EC2 # EC2 launch type
+      TaskDefinition: !Ref TaskDefinition # Reference to project task definition
+
+      # Load Balancer Integration: Connect to project-specific target group
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName # Must match task definition
+          ContainerPort: !Ref ContainerPort # Application port
+          TargetGroupArn: !Ref TargetGroupArn # Project-specific target group
+
+      # Service Configuration
+      EnableECSManagedTags: true
+      DeploymentController:
+        Type: ECS # Standard ECS rolling deployment
+      HealthCheckGracePeriodSeconds: 180 # Startup time allowance
+
+      # Deployment Strategy: Safe for single-instance development
+      DeploymentConfiguration:
+        MaximumPercent: 200 # Allow extra tasks during deployment
+        MinimumHealthyPercent: 50 # Maintain some capacity during updates
+
+      # Service tags with project identification
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ServiceType
+          Value: WebApplication
+        - Key: Component
+          Value: ECSService
+
+Outputs:
+  ECSServiceName:
+    Description: |
+      Name of the ECS service created by this template.
+      Used by CI/CD pipelines for deployment updates and by monitoring tools
+      for service health tracking and management operations.
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub "${ProjectName}ECSServiceName"
+
+  ECSServiceArn:
+    Description: |
+      ARN of the ECS service created by this template.
+      Can be used for IAM policies, monitoring integrations, and other
+      AWS services that require service ARN references.
+    Value: !Ref ECSService
+    Export:
+      Name: !Sub "${ProjectName}ECSServiceArn"
+
+  TaskDefinitionArn:
+    Description: |
+      ARN of the task definition created by this template.
+      Useful for debugging, rollbacks, or creating additional services
+      with the same container configuration.
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub "${ProjectName}TaskDefinitionArn"
+
+  # Conditional output - only export if LogGroup was created
+  LogGroupName:
+    Condition: CreateNewLogGroup #
+    Description: |
+      CloudWatch log group name for container logs.
+      Use this for configuring log aggregation, monitoring dashboards,
+      or setting up log-based alarms and notifications.
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub "${ProjectName}LogGroupName"

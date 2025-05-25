@@ -1,5 +1,5 @@
 # @format
-
+---
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
@@ -25,7 +25,7 @@ Resources:
       Memory: 256
       RequiresCompatibilities:
         - EC2
-      NetworkMode: bridge #Changed from awsvpc to bridge
+      NetworkMode: bridge # Changed from awsvpc to bridge
       ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
       ContainerDefinitions:
         - Name: project2-container

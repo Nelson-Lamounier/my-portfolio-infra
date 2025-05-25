@@ -1,5 +1,5 @@
 # @format
-
+---
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Master Nested Stack to deploy portfolio infrastructure components
 
@@ -50,6 +50,35 @@ Parameters:
     Type: String
   HostedZoneId:
     Type: String
+
+  # Project 1 Dynamic Pipeline Parameters
+  Project1RepositoryId:
+    Type: String
+    Description: GitHub repository for Project 1 (owner/repo)
+    Default: Nelson-Lamounier/magic-rainbow-demo
+
+  Project1ConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Project 1
+
+  Project1ContainerName:
+    Type: String
+    Description: Container name for Project 1
+    Default: project1-container
+
+  Project1ECRRepository:
+    Type: String
+    Description: ECR repository name for Project 1
+    Default: project1-dev
+
+  MigrationMode:
+    Type: String
+    Description: Migration mode for Project 1
+    AllowedValues:
+      - migrate
+      - no-migrate
+    Default: migrate
+    ConstraintDescription: Must be either 'migrate' or 'no-migrate'
 
 Resources:
   VPCStack:
@@ -152,7 +181,21 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: ECSClusterStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Project1Service.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
+      Parameters:
+        ProjectName: Project1
+        ServiceName: project1-service-v2
+        ContainerName: project1-container
+        ECRRepository: !Ref Project1ECRRepository
+        ContainerPort: 3000
+        HostPort: 3000
+        CPU: 128
+        Memory: 256
+        DesiredCount: 1
+        # ECSClusterNameParam: !Ref ECSClusterNameParam
+        TargetGroupArn: !ImportValue Project1TargetGroupArn
+        Region: !Ref Region
+        MigrationMode: !Ref MigrationMode
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -164,10 +207,6 @@ Resources:
           Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
-      Parameters:
-        ECSServiceNameParam: project1-service
-        ECSClusterNameParam: !Ref ECSClusterNameParam
-        Region: !Ref Region
 
   Project2ServiceStack:
     Type: AWS::CloudFormation::Stack
@@ -279,7 +318,7 @@ Resources:
 
   PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: ServiceStack
+    # DependsOn: ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DeploymentPipeline.yml
       Tags:
@@ -299,27 +338,33 @@ Resources:
 
   Project1PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: Project1ServiceStack
+    # DependsOn: Project1ServiceStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project1Pipeline.yml
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
-        Project1ServiceName: !GetAtt Project1ServiceStack.Outputs.Project1ECSServiceName
+        ServiceName: !GetAtt Project1ServiceStack.Outputs.Project1ECSServiceName
+        ProjectName: Project1
+        RepositoryId: !Ref Project1RepositoryId
+        ConnectionArn: !Ref Project1ConnectionArn
+        ContainerName: !Ref Project1ContainerName
+        ECRRepositoryName: !Ref Project1ECRRepository
+        TemplateBucket: !Ref TemplateBucket
+        Tags:
+          - Key: Project
+            Value: !FindInMap [TagMap, !Ref Environment, Project]
+          - Key: Owner
+            Value: !FindInMap [TagMap, !Ref Environment, Owner]
+          - Key: CreatedBy
+            Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+          - Key: CostCenter
+            Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+          - Key: Environment
+            Value: !Ref Environment
 
   Project2PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: Project2ServiceStack
+    # DependsOn: Project2ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project2Pipeline.yml
       Tags:
@@ -339,7 +384,7 @@ Resources:
 
   Project3PipelineStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: ProjectFullStackServiceStack
+    # DependsOn: ProjectFullStackServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project3Pipeline.yml
       Tags:

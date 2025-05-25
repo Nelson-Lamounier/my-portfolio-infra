@@ -77,18 +77,24 @@ Parameters:
       naming conventions (lowercase, hyphen-separated).
       Examples: 'portfolio-app', 'ecommerce-frontend', 'api-backend'
 
-  BuildSpecOverride:
+  TemplateBucket:
     Type: String
     Description: |
-      Optional custom BuildSpec configuration for specialized build requirements.
-      When provided, overrides the default Docker build process.
-      Use for projects requiring custom build steps, multiple Dockerfiles,
-      or complex build environments. Leave empty to use default BuildSpec.
-    Default: ""
+      S3 bucket containing CloudFormation templates.
+      Used by nested stacks to reference IAM policy templates.
+
+  # BuildSpecOverride:
+  #   Type: String
+  #   Description: |
+  #     Optional custom BuildSpec configuration for specialised build requirements.
+  #     When provided, overrides the default Docker build process.
+  #     Use for projects requiring custom build steps, multiple Dockerfiles,
+  #     or complex build environments. Leave empty to use default BuildSpec.
+  #   Default: ""
 
 # Conditional Logic: Determine whether to use custom or default BuildSpec
-Conditions:
-  HasCustomBuildSpec: !Not [!Equals [!Ref BuildSpecOverride, ""]]
+# Conditions:
+#   HasCustomBuildSpec: !Not [!Equals [!Ref BuildSpecOverride, ""]]
 
 Resources:
   # Nested Stack: CodeBuild IAM Policies

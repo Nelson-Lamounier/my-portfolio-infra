@@ -1,5 +1,5 @@
 # @format
-
+---
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Deployment pipeline stack
 
@@ -93,6 +93,7 @@ Resources:
             Principal:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
+
       Policies:
         - PolicyName: CodePipelineSSMParameterAccess
           PolicyDocument:

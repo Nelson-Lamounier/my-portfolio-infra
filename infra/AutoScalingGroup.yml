@@ -1,5 +1,5 @@
 # @format
-
+---
 Resources:
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup

@@ -1,5 +1,5 @@
 # @format
-
+---
 AWSTemplateFormatVersion: "2010-09-09"
 Description: CI/CD Pipeline for Project1 (Docker → ECR → ECS)
 
@@ -39,6 +39,7 @@ Resources:
                 Resource:
                   - !Sub arn:aws:s3:::${ArtifactBucket}
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
+
         - PolicyName: CodeBuildLoggingPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -49,6 +50,7 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: "*"
+
         - PolicyName: CodeBuildSSMAccess
           PolicyDocument:
             Version: "2012-10-17"
@@ -93,20 +95,101 @@ Resources:
             Principal:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
+
       Policies:
-        - PolicyName: CodePipelineFullAccess
+        - PolicyName: CodePipelineSSMParameterAccess
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - codebuild:*
-                  - ecs:*
-                  - iam:PassRole
-                  - s3:*
                   - ssm:GetParameter
-                  - codestar-connections:UseConnection
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
+
+        - PolicyName: CodePipelineS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+
+        - PolicyName: CodePipelineECSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Core ECS deployment permissions
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DescribeClusters
+                  - ecs:ListClusters
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:CreateService
+                  - ecs:DeleteService
+                  - ecs:ListServices
+                  - ecs:ListTaskDefinitions
+                  - ecs:RunTask
+                  - ecs:StopTask
                 Resource: "*"
+
+              # additional ECS permissions
+              - Effect: Allow
+                Action:
+                  - ecs:TagResource
+                  - ecs:UntagResource
+                  - ecs:ListTagsForResource
+                Resource: "*"
+
+              # Application auto-scaling permissions
+              - Effect: Allow
+                Action:
+                  - application-autoscaling:*
+                Resource: "*"
+
+              # CloudWatch permissions
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: "*"
+
+              # Codebuild permissions
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - codebuild:BatchGetProjects
+                Resource: "*"
+
+        - PolicyName: CodePipelineIAMPassRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !ImportValue TaskExecutionRoleArn
+
+        - PolicyName: CodePipelineSourceAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: !Sub arn:aws:codeconnections:${AWS::Region}:${AWS::AccountId}:connection/a0ea9026-2c2c-40a7-8120-433cc6a49163
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline

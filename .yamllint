@@ -1,0 +1,12 @@
+# @format
+
+extends: default
+rules:
+  line-length:
+    max: 150
+  comments:
+    min-spaces-from-content: 1
+  indentation:
+    spaces: 2
+  truthy:
+    allowed-values: ["true", "false", "on", "off"]

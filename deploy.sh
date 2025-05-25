@@ -3,7 +3,14 @@ set -e
 
 # === LOAD CONFIG FROM .env ===
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  # Load .env file, filtering out comments and empty lines
+  while IFS= read -r line; do
+    # Skip comments and empty lines
+    [[ $line =~ ^[[:space:]]*# ]] && continue
+    [[ -z "$line" ]] && continue
+    # Export the variable
+    export "$line"
+  done < .env
 else
   echo ".env file not found. Please create one with your config."
   exit 1
@@ -14,12 +21,28 @@ if [[ -z "$REGION" ]]; then
   exit 1
 fi
 
+# Set migration mode if not already set
+MIGRATION_MODE="${MIGRATION_MODE:-migrate}"
+export MIGRATION_MODE
+
+# Updated required variables for dynamic pipelines
 REQUIRED_VARS=(
   BUCKET_NAME TEMPLATE_PREFIX ARTIFACT_BUCKET ECS_CLUSTER
-  ECSClusterNameParam PORTFOLIO_SERVICE_NAME STACK_NAME REGION ENVIRONMENT
+  PORTFOLIO_SERVICE_NAME STACK_NAME REGION ENVIRONMENT
   ROOT_DOMAIN_NAME WWW_DOMAIN_NAME PROJECT1_DOMAIN PROJECT2_DOMAIN
   PROJECT3_FRONTEND_DOMAIN PROJECT3_BACKEND_DOMAIN HOSTED_ZONE_ID
+  # New variables for dynamic pipelines
+  PROJECT1_REPO PROJECT1_CONNECTION_ARN PROJECT1_CONTAINER_NAME PROJECT1_ECR_REPO
+
 )
+
+# Check all required variables are set
+for var in "${REQUIRED_VARS[@]}"; do
+  if [[ -z "${!var}" ]]; then
+    echo "Required variable $var is not set in .env"
+    exit 1
+  fi
+done
 
 # === STEP 1: Check/Create S3 Bucket ===
 echo "Checking if S3 bucket '$BUCKET_NAME' exists..."
@@ -33,14 +56,43 @@ else
         --create-bucket-configuration LocationConstraint="$REGION"
 fi
 
-# === STEP 2: Upload CloudFormation Templates to S3 ===
+# # === STEP 2: Template Validation ===
+# echo "Validating CloudFormation templates..."
+
+# # Validate YAML syntax
+# echo "Checking YAML syntax..."
+# if command -v yamllint &> /dev/null; then
+#     yamllint infra/
+# else
+#     echo "Warning: yamllint not installed. Skipping YAML validation."
+# fi
+
+# # Validate CloudFormation templates
+# echo "Validating CloudFormation templates..."
+# if command -v cfn-lint &> /dev/null; then
+#     cfn-lint infra/MasterNestedStack.yml
+#     cfn-lint infra/pipelines/DynamicPipeline.yml
+#     cfn-lint infra/iam/CodeBuildPolicies.yml
+#     cfn-lint infra/iam/CodePipelinePolicies.yml
+# else
+#     echo "Warning: cfn-lint not installed. Skipping CloudFormation validation."
+# fi
+
+# # AWS CloudFormation validate-template
+# echo "Validating with AWS CloudFormation..."
+# aws cloudformation validate-template \
+#     --template-body file://infra/MasterNestedStack.yml \
+#     --region "$REGION"
+
+# === STEP 3: Upload CloudFormation Templates to S3 ===
 echo "Syncing templates to S3..."
 aws s3 sync ./infra/ "s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}" \
     --exclude "*" \
     --include "*.yml" \
-    --delete
+    --delete \
+    --region "$REGION"
 
-
+echo "Templates uploaded successfully to s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}"
 # # === STEP 3: Fetch Certificate ARN ===
 # echo "Fetching Certificate ARN from us-east-1..."
 # CERT_ARN=$(aws cloudformation describe-stacks \
@@ -75,41 +127,75 @@ aws cloudformation deploy \
     ProjectBackendEcommDomain="$PROJECT3_BACKEND_DOMAIN" \
     HostedZoneId="$HOSTED_ZONE_ID" \
     Environment="$ENVIRONMENT" \
+    Project1RepositoryId="$PROJECT1_REPO" \
+    Project1ConnectionArn="$PROJECT1_CONNECTION_ARN" \
+    Project1ContainerName="$PROJECT1_CONTAINER_NAME" \
+    Project1ECRRepository="$PROJECT1_ECR_REPO" \
+    MigrationMode="$MIGRATION_MODE" \
   --capabilities CAPABILITY_NAMED_IAM \
-  --region "$REGION"
+  --region "$REGION" \
+  --no-fail-on-empty-changeset
 
-echo "Master stack deployed successfully."
+echo "Master stack deployment initiated..."
 
 # === STEP 5: Monitor Stack and Cancel If Timeout ===
-echo "⏱️ Monitoring stack for up to 15 minutes..."
-STACK_NAME="PortfolioMasterStack"
-TIMEOUT=900  # 15 minutes
+echo "⏱️ Monitoring stack for up to 20 minutes..."
+TIMEOUT=1200  # 20 minutes (increased for nested stacks)
 START_TIME=$(date +%s)
 
 while true; do
   STATUS=$(aws cloudformation describe-stacks \
-    --stack-name $STACK_NAME \
-    --region $REGION \
+    --stack-name "$STACK_NAME" \
+    --region "$REGION" \
     --query "Stacks[0].StackStatus" \
-    --output text)
+    --output text 2>/dev/null || echo "STACK_NOT_FOUND")
 
-  echo "Stack status: $STATUS"
-
-  if [[ "$STATUS" == *"COMPLETE"* ]]; then
-    echo "Stack completed: $STATUS"
-    break
-  elif [[ "$STATUS" == *"ROLLBACK"* || "$STATUS" == *"FAILED"* ]]; then
-    echo "Stack failed or rolled back: $STATUS"
-    break
+  if [ "$STATUS" = "STACK_NOT_FOUND" ]; then
+    echo "Stack not found. May have been deleted or never created."
+    exit 1
   fi
+
+  echo "Stack status: $STATUS ($(date '+%H:%M:%S'))"
+
+  case "$STATUS" in
+    *"COMPLETE"*)
+      echo "✅ Stack completed successfully: $STATUS"
+      break
+      ;;
+    *"ROLLBACK"*|*"FAILED"*)
+      echo "❌ Stack failed or rolled back: $STATUS"
+      echo "Checking recent stack events for errors..."
+      aws cloudformation describe-stack-events \
+        --stack-name "$STACK_NAME" \
+        --region "$REGION" \
+        --query 'StackEvents[0:5].[Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+        --output table
+      exit 1
+      ;;
+    *"IN_PROGRESS"*)
+      echo "⏳ Stack operation in progress..."
+      ;;
+  esac
 
   ELAPSED=$(( $(date +%s) - $START_TIME ))
   if (( ELAPSED > TIMEOUT )); then
-    echo "Timeout reached. Cancelling update..."
-    aws cloudformation cancel-update-stack --stack-name $STACK_NAME --region $REGION
-    break
+    echo "⏰ Timeout reached after $((TIMEOUT/60)) minutes. Cancelling update..."
+    aws cloudformation cancel-update-stack \
+      --stack-name "$STACK_NAME" \
+      --region "$REGION" 2>/dev/null || echo "Cancel operation failed or not applicable"
+    exit 1
   fi
 
-  sleep 20
+  sleep 30
 done
+
+# === STEP 6: Display Stack Outputs ===
+echo "📋 Stack Outputs:"
+aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" \
+  --region "$REGION" \
+  --query 'Stacks[0].Outputs[].[OutputKey,OutputValue,Description]' \
+  --output table 2>/dev/null || echo "No outputs available"
+
+echo "🎉 Deployment completed successfully!"
 
