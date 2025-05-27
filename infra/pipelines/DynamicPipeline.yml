@@ -27,6 +27,7 @@ Parameters:
       This bucket serves as temporary storage for source code, build outputs,
       and deployment artifacts as they move between pipeline stages.
       Should be pre-created and accessible by the pipeline role.
+    Default: "infra/"
 
   ServiceName:
     Type: String
@@ -97,38 +98,38 @@ Parameters:
 #   HasCustomBuildSpec: !Not [!Equals [!Ref BuildSpecOverride, ""]]
 
 Resources:
-  # Nested Stack: CodeBuild IAM Policies
-  # Separates IAM concerns for better maintainability and reusability
-  IAMPolicies:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      # Reference to centralized IAM policy template
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/iam/CodeBuildPolicies.yml
-      Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
-        ProjectName: !Ref ProjectName
-      Tags:
-        - Key: Component
-          Value: IAM
-        - Key: Purpose
-          Value: CodeBuild Permissions
+  # # Nested Stack: CodeBuild IAM Policies
+  # # Separates IAM concerns for better maintainability and reusability
+  # IAMPolicies:
+  #   Type: AWS::CloudFormation::Stack
+  #   Properties:
+  #     # Reference to centralised IAM policy template
+  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}iam/CodeBuildPolicies.yml
+  #     Parameters:
+  #       ArtifactBucket: !Ref ArtifactBucket
+  #       ProjectName: !Ref ProjectName
+  #     Tags:
+  #       - Key: Component
+  #         Value: IAM
+  #       - Key: Purpose
+  #         Value: CodeBuild Permissions
 
-  # Nested Stack: CodePipeline IAM Policies
-  # Centralizes pipeline permissions for consistency across projects
-  PipelineIAMPolicies:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      # Reference to centralized pipeline IAM template
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/iam/CodePipelinePolicies.yml
-      Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
-        ProjectName: !Ref ProjectName
-        ConnectionArn: !Ref ConnectionArn
-      Tags:
-        - Key: Component
-          Value: IAM
-        - Key: Purpose
-          Value: CodePipeline Permissions
+  # # Nested Stack: CodePipeline IAM Policies
+  # # Centralizes pipeline permissions for consistency across projects
+  # PipelineIAMPolicies:
+  #   Type: AWS::CloudFormation::Stack
+  #   Properties:
+  #     # Reference to centralized pipeline IAM template
+  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/iam/${TemplatePrefix}CodePipelinePolicies.yml
+  #     Parameters:
+  #       ArtifactBucket: !Ref ArtifactBucket
+  #       ProjectName: !Ref ProjectName
+  #       ConnectionArn: !Ref ConnectionArn
+  #     Tags:
+  #       - Key: Component
+  #         Value: IAM
+  #       - Key: Purpose
+  #         Value: CodePipeline Permissions
 
   # CodeBuild Project: Handles Docker image compilation and ECR publishing
   CodeBuildProject:
@@ -157,7 +158,7 @@ Resources:
           # Pass container name to buildspec
           - Name: CONTAINER_NAME
             Value: !Ref ContainerName
-      ServiceRole: !GetAtt IAMPolicies.Outputs.CodeBuildRoleArn
+      ServiceRole: !ImportValue Portfolio-CodeBuildRoleArn
 
   # CodePipeline: Orchestrates the complete CI/CD workflow
   Pipeline:
@@ -167,7 +168,7 @@ Resources:
       Name: !Sub ${ProjectName}-Pipeline
 
       # Use IAM role from nested stack for pipeline orchestration
-      RoleArn: !GetAtt PipelineIAMPolicies.Outputs.CodePipelineRoleArn
+      RoleArn: !ImportValue Portfolio-CodePipelineRoleArn
 
       # Artifact storage configuration
       ArtifactStore:

@@ -38,6 +38,15 @@ Parameters:
       without storing credentials directly in the pipeline configuration.
       Format: arn:aws:codeconnections:region:account:connection/connection-id
 
+  TaskExecutionRoleArn:
+    Type: String
+    Description: |
+      ARN of the ECS Task Execution Role. If not provided, will use wildcard permissions.
+    Default: ""
+
+Conditions:
+  HasTaskExecutionRole: !Not [!Equals [!Ref TaskExecutionRoleArn, ""]]
+
 Resources:
   CodePipelineRole:
     Type: AWS::IAM::Role
@@ -159,7 +168,9 @@ Resources:
                 Resource:
                   # Specific task execution role created by ECS cluster infrastructure
                   # This role is used by ECS to pull container images and write logs
-                  - !ImportValue TaskExecutionRoleArn
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*TaskExecutionRole*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-TaskExecutionRole"
 
         # Source Control Integration: Secure access to GitHub repositories
         - PolicyName: SourceAccess

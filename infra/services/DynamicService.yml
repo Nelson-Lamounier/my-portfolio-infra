@@ -97,9 +97,15 @@ Parameters:
     Default: "new"
     AllowedValues: ["new", "migrate", "cleanup"]
 
+  ExportSuffix:
+    Type: String
+    Description: Optional suffix for export names to avoid conflicts during migration
+    Default: ""
+
 Conditions:
   CreateNewLogGroup: !Equals [!Ref MigrationMode, "new"]
   MigrateExisting: !Equals [!Ref MigrationMode, "migrate"]
+  HasExportSuffix: !Not [!Equals [!Ref ExportSuffix, ""]]
 
 Resources:
   # CloudWatch Log Group: Project-specific logging
@@ -196,7 +202,10 @@ Outputs:
       for service health tracking and management operations.
     Value: !Ref ECSService
     Export:
-      Name: !Sub "${ProjectName}ECSServiceName"
+      Name: !If
+        - HasExportSuffix
+        - !Sub "${ProjectName}ECSServiceName${ExportSuffix}"
+        - !Sub "${ProjectName}ECSServiceName"
 
   ECSServiceArn:
     Description: |
@@ -205,7 +214,10 @@ Outputs:
       AWS services that require service ARN references.
     Value: !Ref ECSService
     Export:
-      Name: !Sub "${ProjectName}ECSServiceArn"
+      Name: !If
+        - HasExportSuffix
+        - !Sub "${ProjectName}ECSServiceArn${ExportSuffix}"
+        - !Sub "${ProjectName}ECSServiceArn"
 
   TaskDefinitionArn:
     Description: |
@@ -214,7 +226,10 @@ Outputs:
       with the same container configuration.
     Value: !Ref TaskDefinition
     Export:
-      Name: !Sub "${ProjectName}TaskDefinitionArn"
+      Name: !If
+        - HasExportSuffix
+        - !Sub "${ProjectName}TaskDefinitionArn${ExportSuffix}"
+        - !Sub "${ProjectName}TaskDefinitionArn"
 
   # Conditional output - only export if LogGroup was created
   LogGroupName:
@@ -225,4 +240,7 @@ Outputs:
       or setting up log-based alarms and notifications.
     Value: !Ref LogGroup
     Export:
-      Name: !Sub "${ProjectName}LogGroupName"
+      Name: !If
+        - HasExportSuffix
+        - !Sub "${ProjectName}LogGroupName${ExportSuffix}"
+        - !Sub "${ProjectName}LogGroupName"

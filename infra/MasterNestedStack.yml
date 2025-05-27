@@ -184,7 +184,7 @@ Resources:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
       Parameters:
         ProjectName: Project1
-        ServiceName: project1-service-v2
+        ServiceName: project1-service
         ContainerName: project1-container
         ECRRepository: !Ref Project1ECRRepository
         ContainerPort: 3000
@@ -196,6 +196,7 @@ Resources:
         TargetGroupArn: !ImportValue Project1TargetGroupArn
         Region: !Ref Region
         MigrationMode: !Ref MigrationMode
+        ExportSuffix: V1
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -207,6 +208,27 @@ Resources:
           Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
+
+  # Project1ServiceStack:
+  #   Type: AWS::CloudFormation::Stack
+  #   DependsOn: ECSClusterStack
+  #   Properties:
+  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/Project1Service.yml
+  #     Tags:
+  #       - Key: Project
+  #         Value: !FindInMap [TagMap, !Ref Environment, Project]
+  #       - Key: Owner
+  #         Value: !FindInMap [TagMap, !Ref Environment, Owner]
+  #       - Key: CreatedBy
+  #         Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+  #       - Key: CostCenter
+  #         Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+  #       - Key: Environment
+  #         Value: !Ref Environment
+  #     Parameters:
+  #       ECSServiceNameParam: project1-service
+  #       ECSClusterNameParam: !Ref ECSClusterNameParam
+  #       Region: !Ref Region
 
   Project2ServiceStack:
     Type: AWS::CloudFormation::Stack
@@ -316,9 +338,48 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+    # Add IAM stacks BEFORE pipeline stacks
+  CodeBuildPoliciesStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}iam/CodeBuildPolicies.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
+        ProjectName: !FindInMap [TagMap, !Ref Environment, Project]
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+
+  CodePipelinePoliciesStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}iam/CodePipelinePolicies.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
+        ProjectName: !FindInMap [TagMap, !Ref Environment, Project]
+        ConnectionArn: !Ref Project1ConnectionArn
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+
   PipelineStack:
     Type: AWS::CloudFormation::Stack
-    # DependsOn: ServiceStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DeploymentPipeline.yml
       Tags:
@@ -338,33 +399,38 @@ Resources:
 
   Project1PipelineStack:
     Type: AWS::CloudFormation::Stack
-    # DependsOn: Project1ServiceStack
+    DependsOn:
+      - Project1ServiceStack #  Pipeline needs the service first
+      - CodeBuildPoliciesStack #  Pipeline needs CodeBuild IAM role
+      - CodePipelinePoliciesStack #  Pipeline needs CodePipeline IAM role
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
-        ServiceName: !GetAtt Project1ServiceStack.Outputs.Project1ECSServiceName
+        ServiceName: !GetAtt Project1ServiceStack.Outputs.ECSServiceName
         ProjectName: Project1
         RepositoryId: !Ref Project1RepositoryId
         ConnectionArn: !Ref Project1ConnectionArn
         ContainerName: !Ref Project1ContainerName
         ECRRepositoryName: !Ref Project1ECRRepository
         TemplateBucket: !Ref TemplateBucket
-        Tags:
-          - Key: Project
-            Value: !FindInMap [TagMap, !Ref Environment, Project]
-          - Key: Owner
-            Value: !FindInMap [TagMap, !Ref Environment, Owner]
-          - Key: CreatedBy
-            Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-          - Key: CostCenter
-            Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-          - Key: Environment
-            Value: !Ref Environment
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
 
   Project2PipelineStack:
     Type: AWS::CloudFormation::Stack
-    # DependsOn: Project2ServiceStack
+    DependsOn:
+      - CodeBuildPoliciesStack
+      - CodePipelinePoliciesStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project2Pipeline.yml
       Tags:

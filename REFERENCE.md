@@ -365,3 +365,45 @@ aws ecs describe-services \
  --output table
 
 # Note: Replace placeholder values (bucket names, domain names, connection ARNs) with your actual values before running commands.
+
+# Commands to debug the deployment of Dynamic Service stack
+
+# Check if the export exists
+
+aws cloudformation list-exports \
+ --region eu-west-1 \
+ --query 'Exports[?Name==`Project1TargetGroupArn`].{Name:Name,Value:Value}' \
+ --output table
+
+# Check if log groups exist
+
+aws logs describe-log-groups --log-group-name-prefix "/ecs/Project1" --region eu-west-1
+
+# Delete any existing conflicting log groups:
+
+aws logs delete-log-group --log-group-name "/ecs/Project1-task" --region eu-west-1
+
+# Delete any existing conflicting log groups:
+
+aws logs delete-log-group --log-group-name "/ecs/Project1-task" --region eu-west-1
+
+# Verify target group export:
+
+aws cloudformation list-exports --region eu-west-1 | grep -i project1
+
+# Check CodeBuildPolicies.yml parameters
+
+head -20 ./infra/iam/CodeBuildPolicies.yml | grep -A 10 "Parameters:"
+
+# Check CodePipelinePolicies.yml parameters
+
+head -20 ./infra/iam/CodePipelinePolicies.yml | grep -A 10 "Parameters:"
+
+# First, find the policy name attached to your user or group
+
+aws iam list-user-policies --user-name deployment-user
+aws iam list-attached-user-policies --user-name deployment-user
+
+# If it's an inline policy, update it (replace POLICY_NAME with actual name)
+
+aws iam put-user-policy --user-name deployment-user --policy-name POLICY_NAME --policy-document
