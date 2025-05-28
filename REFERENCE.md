@@ -407,3 +407,23 @@ aws iam list-attached-user-policies --user-name deployment-user
 # If it's an inline policy, update it (replace POLICY_NAME with actual name)
 
 aws iam put-user-policy --user-name deployment-user --policy-name POLICY_NAME --policy-document
+
+# Delete the master stack (this will delete all nested stacks too)
+
+aws cloudformation delete-stack \
+ --stack-name PortfolioMasterStack \
+ --region eu-west-1
+
+# Wait for deletion to complete
+
+aws cloudformation wait stack-delete-complete \
+ --stack-name PortfolioMasterStack \
+ --region eu-west-1
+
+# Get your current public IP
+
+MY_IP=$(curl -s ifconfig.me)
+
+# Update .env with your specific IP
+
+CIDR_IP=${MY_IP}/32

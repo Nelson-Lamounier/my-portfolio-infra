@@ -3,6 +3,12 @@
 Resources:
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
+    UpdatePolicy: # Add this for automatic updates
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 0
+        MaxBatchSize: 1
+        PauseTime: PT5M
+        WaitOnResourceSignals: false
     Properties:
       MinSize: 1
       MaxSize: 1

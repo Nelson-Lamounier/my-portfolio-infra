@@ -68,7 +68,6 @@ Parameters:
       This name is used in imagedefinitions.json to specify which container
       image to update during deployment. Must match exactly with the task definition.
       If unsure, check your ECS task definition in the AWS Console.
-    Default: "app-container"
 
   ECRRepositoryName:
     Type: String
@@ -100,36 +99,6 @@ Parameters:
 Resources:
   # # Nested Stack: CodeBuild IAM Policies
   # # Separates IAM concerns for better maintainability and reusability
-  # IAMPolicies:
-  #   Type: AWS::CloudFormation::Stack
-  #   Properties:
-  #     # Reference to centralised IAM policy template
-  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}iam/CodeBuildPolicies.yml
-  #     Parameters:
-  #       ArtifactBucket: !Ref ArtifactBucket
-  #       ProjectName: !Ref ProjectName
-  #     Tags:
-  #       - Key: Component
-  #         Value: IAM
-  #       - Key: Purpose
-  #         Value: CodeBuild Permissions
-
-  # # Nested Stack: CodePipeline IAM Policies
-  # # Centralizes pipeline permissions for consistency across projects
-  # PipelineIAMPolicies:
-  #   Type: AWS::CloudFormation::Stack
-  #   Properties:
-  #     # Reference to centralized pipeline IAM template
-  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/iam/${TemplatePrefix}CodePipelinePolicies.yml
-  #     Parameters:
-  #       ArtifactBucket: !Ref ArtifactBucket
-  #       ProjectName: !Ref ProjectName
-  #       ConnectionArn: !Ref ConnectionArn
-  #     Tags:
-  #       - Key: Component
-  #         Value: IAM
-  #       - Key: Purpose
-  #         Value: CodePipeline Permissions
 
   # CodeBuild Project: Handles Docker image compilation and ECR publishing
   CodeBuildProject:

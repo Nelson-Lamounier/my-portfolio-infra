@@ -43,6 +43,11 @@ Parameters:
       - Outbound internet connectivity for applications
       Must be in the same VPC as the ECS cluster.
 
+  CidrIp:
+    Type: String
+    Default: |
+      Use to secure SSH access to the instances from a specific IP or range.
+
 Resources:
   # IAM Role: Grants EC2 instances necessary permissions to operate as ECS container hosts
   ECSInstanceRole:
@@ -86,36 +91,84 @@ Resources:
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
           Description: "HTTP access for load balancer and web traffic"
 
         # Alternative HTTP port: Common for development and custom applications
         - IpProtocol: tcp
           FromPort: 8080
           ToPort: 8080
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
           Description: "Alternative HTTP port for applications"
 
         # SSH access: Remote administration and troubleshooting
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
-          CidrIp: 0.0.0.0/0
+          CidrIp: !Ref CidrIp
           Description: "SSH access for remote administration"
 
         # Development ports: Common application development port range
         - IpProtocol: tcp
-          FromPort: 3000
-          ToPort: 3002
-          CidrIp: 0.0.0.0/0
+          FromPort: 32768
+          ToPort: 65535
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
           Description: "Development application ports (React, Node.js, etc.)"
 
-        # API/Backend port: Common port for backend services
         - IpProtocol: tcp
-          FromPort: 4000
-          ToPort: 4000
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description: "Development application ports (React, Node.js, etc.)"
+
+        - IpProtocol: tcp
+          FromPort: 3001
+          ToPort: 3001
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description:
+            "Development application ports (React, Node.js, etc.)"
+
+            # ECS agent communication
+        - IpProtocol: tcp
+          FromPort: 51678
+          ToPort: 51678
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+
+        # API/Backend port: Common port for backend services
+        # - IpProtocol: tcp
+        #   FromPort: 4000
+        #   ToPort: 4000
+        #   CidrIp: 0.0.0.0/0
+        #   Description: "Backend/API service port"
+
+      SecurityGroupEgress:
+        # HTTPS for ECS API calls and ECR
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: "Backend/API service port"
+          Description: "HTTPS for ECS API and ECR"
+
+        # HTTP for package updates
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: "HTTP for updates"
+
+        # DNS resolution
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: "DNS resolution"
+
+        # NTP for time synchronization
+        - IpProtocol: udp
+          FromPort: 123
+          ToPort: 123
+          CidrIp: 0.0.0.0/0
+          Description: "NTP time sync"
 
   # Launch Template: Defines the blueprint for EC2 instance configuration
   LaunchTemplate:
@@ -194,10 +247,16 @@ Outputs:
       Launch templates support versioning for rolling updates and rollbacks.
       This output provides the current version for reference by other resources.
       For production, consider using '$Latest' or specific version numbers.
-    Value: "1" # Initial version, increment for updates
+    Value: !GetAtt LaunchTemplate.LatestVersionNumber # Initial version, increment for updates
     Export:
       # Global export name for version tracking
       Name: LaunchTemplateVersion
+
+  # InstanceProfile:
+  #   Description: ARN of the ECS instance profile
+  #   Value: !GetAtt ECSInstanceProfile.Arn
+  #   Export:
+  #     Name: InstanceProfileArn
 # Template Usage and Operational Notes:
 #
 # 1. Prerequisites:

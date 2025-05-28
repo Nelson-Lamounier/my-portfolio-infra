@@ -47,15 +47,12 @@ Parameters:
     Description: |
       Port that the application listens on inside the container.
       This is the port exposed by your application (e.g., Express.js on 3000).
-    Default: 80
 
   HostPort:
     Type: Number
     Description: |
-      Port on the EC2 host that maps to the container port.
-      Must be unique across all services on the same EC2 instance.
-      Used by ALB target groups for health checks and traffic routing.
-    Default: 8080
+      HostPort that the application listens on inside the container.
+      This is the port exposed by your application (e.g., Express.js on 3000).
 
   CPU:
     Type: Number
@@ -94,8 +91,8 @@ Parameters:
   MigrationMode:
     Type: String
     Description: Migration mode to handle existing log groups
-    Default: "new"
-    AllowedValues: ["new", "migrate", "cleanup"]
+    Default: "migrate"
+    AllowedValues: ["migrate", "no-migrate"]
 
   ExportSuffix:
     Type: String
@@ -103,29 +100,28 @@ Parameters:
     Default: ""
 
 Conditions:
-  CreateNewLogGroup: !Equals [!Ref MigrationMode, "new"]
-  MigrateExisting: !Equals [!Ref MigrationMode, "migrate"]
+  CreateNewLogGroup: !Equals [!Ref MigrationMode, "no-migrate"]
+  IsMigrationMode: !Equals [!Ref MigrationMode, "migrate"]
   HasExportSuffix: !Not [!Equals [!Ref ExportSuffix, ""]]
+  IsNextJS: !Equals [!Ref ProjectName, "Project1"] # Project1 uses Next.js
+  IsReact: !Equals [!Ref ProjectName, "Portfolio"] # Portfolio uses React
+  IsStatic: !Equals [!Ref ProjectName, "Project2"]
 
 Resources:
   # CloudWatch Log Group: Project-specific logging
   LogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: CreateNewLogGroup
+    Condition: CreateNewLogGroup # ✅ Only create if condition
+    DeletionPolicy: Retain
     Properties:
-      LogGroupName: !Sub "/ecs/${ProjectName}-${ServiceName}" # More unique naming
+      LogGroupName: !Sub "/ecs/${ProjectName}-task"
       RetentionInDays: 7 # Adjust for production needs
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Component
-          Value: Logging
 
   # Task Definition: Container blueprint with project-specific configuration
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub "${ProjectName}-${ServiceName}-task" # More unique family name
+      Family: !Sub "${ProjectName}-task" # More unique family name
       Cpu: !Ref CPU # Configurable CPU allocation
       Memory: !Ref Memory # Configurable memory allocation
       RequiresCompatibilities:
@@ -143,20 +139,17 @@ Resources:
 
           PortMappings:
             - ContainerPort: !Ref ContainerPort # Application port inside container
-              HostPort: !Ref HostPort # Unique host port for ALB routing
+              HostPort: !Ref HostPort
               Protocol: tcp # TCP protocol for HTTP traffic
 
           # Project-specific CloudWatch logging
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              # Use conditional log group naming
-              awslogs-group: !If
-                - CreateNewLogGroup
-                - !Sub "/ecs/${ProjectName}-${ServiceName}"
-                - !Sub "/ecs/portfolio-task" # Use existing during migration
+              awslogs-group: !Sub "/ecs/${ProjectName}-task"
               awslogs-region: !Ref Region
               awslogs-stream-prefix: ecs
+              awslogs-create-group: "true"
 
   # ECS Service: Manages running tasks with project-specific configuration
   ECSService:
@@ -184,6 +177,9 @@ Resources:
       DeploymentConfiguration:
         MaximumPercent: 200 # Allow extra tasks during deployment
         MinimumHealthyPercent: 50 # Maintain some capacity during updates
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
 
       # Service tags with project identification
       Tags:
@@ -202,10 +198,7 @@ Outputs:
       for service health tracking and management operations.
     Value: !Ref ECSService
     Export:
-      Name: !If
-        - HasExportSuffix
-        - !Sub "${ProjectName}ECSServiceName${ExportSuffix}"
-        - !Sub "${ProjectName}ECSServiceName"
+      Name: !Sub "${ProjectName}ECSServiceName"
 
   ECSServiceArn:
     Description: |
@@ -213,11 +206,6 @@ Outputs:
       Can be used for IAM policies, monitoring integrations, and other
       AWS services that require service ARN references.
     Value: !Ref ECSService
-    Export:
-      Name: !If
-        - HasExportSuffix
-        - !Sub "${ProjectName}ECSServiceArn${ExportSuffix}"
-        - !Sub "${ProjectName}ECSServiceArn"
 
   TaskDefinitionArn:
     Description: |
@@ -225,11 +213,6 @@ Outputs:
       Useful for debugging, rollbacks, or creating additional services
       with the same container configuration.
     Value: !Ref TaskDefinition
-    Export:
-      Name: !If
-        - HasExportSuffix
-        - !Sub "${ProjectName}TaskDefinitionArn${ExportSuffix}"
-        - !Sub "${ProjectName}TaskDefinitionArn"
 
   # Conditional output - only export if LogGroup was created
   LogGroupName:

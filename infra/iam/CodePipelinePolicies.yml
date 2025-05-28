@@ -183,8 +183,13 @@ Resources:
                   - codestar-connections:UseConnection
                   # Pass connection credentials to CodePipeline service actions
                   - codestar-connections:PassConnection
-                # Scoped to specific connection to prevent unauthorized repository access
-                Resource: !Ref ConnectionArn
+                  # Scoped to specific connection to prevent unauthorized repository access
+                  - codestar-connections:GetConnection
+                  - codestar-connections:ListConnections
+                Resource:
+                  - !Sub "arn:aws:codeconnections:eu-west-1:${AWS::AccountId}:connection/*"
+                  - !Sub "arn:aws:codeconnections:eu-west-2:${AWS::AccountId}:connection/*"
+                  - !Ref ConnectionArn
 
 Outputs:
   CodePipelineRoleArn:
@@ -200,7 +205,7 @@ Outputs:
     Export:
       # Project-specific export name prevents conflicts between multiple pipeline stacks
       # Format: {ProjectName}-CodePipelineRoleArn (e.g., Portfolio-CodePipelineRoleArn)
-      Name: !Sub ${ProjectName}-CodePipelineRoleArn
+      Name: Portfolio-CodePipelineRoleArn
 # Template Usage and Maintenance Notes:
 #
 # 1. Security Best Practices:

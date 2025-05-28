@@ -102,7 +102,7 @@ Outputs:
     Export:
       # Export with project-specific name for use in other stacks
       # Format: {ProjectName}-CodeBuildRoleArn (e.g., Portfolio-CodeBuildRoleArn)
-      Name: !Sub ${ProjectName}-CodeBuildRoleArn
+      Name: Portfolio-CodeBuildRoleArn
 # Template Usage Notes:
 #
 # 1. Security Considerations:

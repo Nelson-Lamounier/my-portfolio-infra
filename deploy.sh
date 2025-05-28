@@ -119,6 +119,7 @@ aws cloudformation deploy \
     ArtifactBucket="$ARTIFACT_BUCKET" \
     ECSClusterNameParam="$ECS_CLUSTER" \
     Region="$REGION" \
+    CidrIp="$CIDR_IP" \
     RootDomainName="$ROOT_DOMAIN_NAME" \
     WWWDomainName="$WWW_DOMAIN_NAME" \
     Project1Domain="$PROJECT1_DOMAIN" \
@@ -131,6 +132,14 @@ aws cloudformation deploy \
     Project1ConnectionArn="$PROJECT1_CONNECTION_ARN" \
     Project1ContainerName="$PROJECT1_CONTAINER_NAME" \
     Project1ECRRepository="$PROJECT1_ECR_REPO" \
+    Project2RepositoryId="$PROJECT2_REPO" \
+    Project2ConnectionArn="$PROJECT2_CONNECTION_ARN" \
+    Project2ContainerName="$PROJECT2_CONTAINER_NAME" \
+    Project2ECRRepository="$PROJECT2_ECR_REPO" \
+    PortfolioRepositoryId="$PORTFOLIO_REPO" \
+    PortfolioConnectionArn="$PORTFOLIO_CONNECTION_ARN" \
+    PortfolioContainerName="$PORTFOLIO_CONTAINER_NAME" \
+    PortfolioECRRepository="$PORTFOLIO_ECR_REPO" \
     MigrationMode="$MIGRATION_MODE" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" \

@@ -43,17 +43,22 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Port: 8080
+      Name: portfolio-target-group
+      Port: 80
       Protocol: HTTP
       VpcId: !ImportValue VPC
       TargetType: instance
       HealthCheckPath: /healthcheck
       HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 3
-      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckPort: traffic-port
       Matcher:
-        HttpCode: 200
+        HttpCode: "200,201,301,302"
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
 
   Project1TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -65,11 +70,15 @@ Resources:
       TargetType: instance
       HealthCheckPath: /api/healthcheck
       HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 3
-      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckPort: traffic-port
       Matcher:
-        HttpCode: 200
+        HttpCode: "200,201,301,302"
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
 
   Project2TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -81,11 +90,15 @@ Resources:
       TargetType: instance
       HealthCheckPath: /index.html
       HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 3
-      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckPort: traffic-port
       Matcher:
-        HttpCode: 200
+        HttpCode: "200,201,301,302"
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
 
   ProjectFrontendEcommTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -230,6 +243,12 @@ Outputs:
     Value: !GetAtt ALB.CanonicalHostedZoneID
     Export:
       Name: LoadBalancerHostedZoneId
+
+  LoadBalancerSGId:
+    Description: Security Group ID for the Application Load Balancer
+    Value: !Ref LoadBalancerSG
+    Export:
+      Name: LoadBalancerSGId
 
   TargetGroupArn:
     Description: The ARN of the ALB target group
