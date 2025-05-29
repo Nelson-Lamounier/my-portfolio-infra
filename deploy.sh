@@ -128,6 +128,10 @@ aws cloudformation deploy \
     ProjectBackendEcommDomain="$PROJECT3_BACKEND_DOMAIN" \
     HostedZoneId="$HOSTED_ZONE_ID" \
     Environment="$ENVIRONMENT" \
+    PortfolioRepositoryId="$PORTFOLIO_REPO" \
+    PortfolioConnectionArn="$PORTFOLIO_CONNECTION_ARN" \
+    PortfolioContainerName="$PORTFOLIO_CONTAINER_NAME" \
+    PortfolioECRRepository="$PORTFOLIO_ECR_REPO" \
     Project1RepositoryId="$PROJECT1_REPO" \
     Project1ConnectionArn="$PROJECT1_CONNECTION_ARN" \
     Project1ContainerName="$PROJECT1_CONTAINER_NAME" \
@@ -136,10 +140,12 @@ aws cloudformation deploy \
     Project2ConnectionArn="$PROJECT2_CONNECTION_ARN" \
     Project2ContainerName="$PROJECT2_CONTAINER_NAME" \
     Project2ECRRepository="$PROJECT2_ECR_REPO" \
-    PortfolioRepositoryId="$PORTFOLIO_REPO" \
-    PortfolioConnectionArn="$PORTFOLIO_CONNECTION_ARN" \
-    PortfolioContainerName="$PORTFOLIO_CONTAINER_NAME" \
-    PortfolioECRRepository="$PORTFOLIO_ECR_REPO" \
+    ProjectFullStackRepositoryId="$PROJECT3_REPO" \
+    ProjectFullStackConnectionArn="$PROJECT3_CONNECTION_ARN" \
+    ProjectFullStackContainerName="$PROJECT3_CONTAINER_NAME" \
+    ProjectFullStackSecondaryContainerName="$PROJECT3_SECONDARY_CONTAINER_NAME" \
+    ProjectFullStackECRRepository="$PROJECT3_ECR_REPO" \
+    ProjectFullStackSecondaryECRRepository="$PROJECT3_SECONDARY_ECR_REPO" \
     MigrationMode="$MIGRATION_MODE" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" \

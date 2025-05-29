@@ -111,7 +111,35 @@ Parameters:
   Project2ECRRepository:
     Type: String
     Description: ECR repository name for Project 2
-    Default: project2-dev
+    Default:
+      project2-dev
+
+      # Project fullStack Dynamic Pipeline Parameters
+  ProjectFullStackRepositoryId:
+    Type: String
+    Description: GitHub repository for Project 2 (owner/repo)
+
+  ProjectFullStackConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Project 2
+
+  ProjectFullStackContainerName:
+    Type: String
+    Description: Container name for Project 2
+
+  ProjectFullStackSecondaryContainerName:
+    Type: String
+    Description: Container name for Project 2
+
+  ProjectFullStackECRRepository:
+    Type: String
+    Description: ECR repository name for Project 2
+    Default: frontend-ecomm-dev
+
+  ProjectFullStackSecondaryECRRepository:
+    Type: String
+    Description: ECR repository name for Project 2
+    Default: backend-ecomm-dev
 
   MigrationMode:
     Type: String
@@ -210,7 +238,7 @@ Resources:
       Parameters:
         ProjectName: Portfolio
         ServiceName: portfolio-service
-        ContainerName: app-container
+        ContainerName: !Ref PortfolioContainerName
         ECRRepository: !Ref PortfolioECRRepository
         ContainerPort: 80
         HostPort: 80
@@ -301,26 +329,46 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-  # ProjectFullStackServiceStack:
-  #   Type: AWS::CloudFormation::Stack
-  #   DependsOn: ECSClusterStack
-  #   Properties:
-  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/ProjectFullStackService.yml
-  #     Tags:
-  #       - Key: Project
-  #         Value: !FindInMap [TagMap, !Ref Environment, Project]
-  #       - Key: Owner
-  #         Value: !FindInMap [TagMap, !Ref Environment, Owner]
-  #       - Key: CreatedBy
-  #         Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-  #       - Key: CostCenter
-  #         Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-  #       - Key: Environment
-  #         Value: !Ref Environment
-  #     Parameters:
-  #       ECSServiceNameParam: fullstack-ecomm-service
-  #       ECSClusterNameParam: !Ref ECSClusterNameParam
-  #       Region: !Ref Region
+  ProjectFullStackServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - LoadBalancerStack
+      - AutoScalingStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
+      Parameters:
+        ProjectName: ProjectFullStack
+        ServiceName: fullstack-ecomm-service
+        # Primary container (Frontend)
+        ContainerName: project-frontend-ecomm-container
+        ECRRepository: frontend-ecomm-dev
+        ContainerPort: 3002
+        HostPort: 3002
+        TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.ProjectFrontendEcommTargetGroupArn
+        # Secondary container (Backend)
+        SecondaryContainerName: project-backend-ecomm-container
+        SecondaryECRRepository: backend-ecomm-dev
+        SecondaryContainerPort: 4000
+        SecondaryHostPort: 4000
+        SecondaryTargetGroupArn: !GetAtt LoadBalancerStack.Outputs.ProjectBackendEcommTargetGroupArn
+        # Resources
+        CPU: 512
+        Memory: 1024
+        Region: !Ref Region
+        MigrationMode: !Ref MigrationMode
+        ExportSuffix: V1
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
 
   AutoScalingStack:
     Type: AWS::CloudFormation::Stack
@@ -518,22 +566,34 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-  # Project3PipelineStack:
-  #   Type: AWS::CloudFormation::Stack
-  #   # DependsOn: ProjectFullStackServiceStack
-  #   Properties:
-  #     TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/Project3Pipeline.yml
-  #     Tags:
-  #       - Key: Project
-  #         Value: !FindInMap [TagMap, !Ref Environment, Project]
-  #       - Key: Owner
-  #         Value: !FindInMap [TagMap, !Ref Environment, Owner]
-  #       - Key: CreatedBy
-  #         Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-  #       - Key: CostCenter
-  #         Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-  #       - Key: Environment
-  #         Value: !Ref Environment
-  #     Parameters:
-  #       ArtifactBucket: !Ref ArtifactBucket
-  #       ProjectEcommServiceName: !GetAtt ProjectFullStackServiceStack.Outputs.ProjectFullStackECSServiceName
+  ProjectFullStackPipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ProjectFullStackServiceStack
+      - CodeBuildPoliciesStack
+      - CodePipelinePoliciesStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
+      Parameters:
+        ArtifactBucket: !Ref ArtifactBucket
+        ServiceName: fullstack-ecomm-service
+        ProjectName: ProjectFullStack
+        RepositoryId: !Ref ProjectFullStackRepositoryId # Add this parameter
+        ConnectionArn: !Ref ProjectFullStackConnectionArn # Add this parameter
+        ContainerName: project-frontend-ecomm-container
+        SecondaryContainerName: project-backend-ecomm-container
+        ECRRepositoryName: frontend-ecomm-dev
+        SecondaryECRRepositoryName: backend-ecomm-dev
+        TemplateBucket: !Ref TemplateBucket
+        ProjectType: full-stack
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment

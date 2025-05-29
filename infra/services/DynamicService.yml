@@ -4,89 +4,110 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Dynamic ECS Service and Task Definition Template
 
-  This reusable template creates ECS services for any project application.
-  It provides consistent configuration while allowing project-specific customization
-  through parameters. Each service includes:
-
-  - Project-specific task definition with configurable resources
-  - ECS service with load balancer integration
-  - CloudWatch logging with project-specific log groups
-  - Flexible container and port configuration
+  This enhanced template supports both single and multi-container ECS services.
+  It can handle simple single-container applications as well as complex
+  multi-tier applications with multiple containers.
 
 Parameters:
   ProjectName:
     Type: String
     Description: |
-      Unique identifier for the project (e.g., 'Portfolio', 'Project1', 'Project2').
+      Unique identifier for the project (e.g., 'Portfolio', 'Project1', 'ProjectFullStack').
       Used to create unique resource names and avoid conflicts between services.
-      Should match the naming convention used throughout your infrastructure.
 
   ServiceName:
     Type: String
     Description: |
       Name for the ECS service within the cluster.
       Will be used as the service identifier and for monitoring purposes.
-      Example: 'portfolio-service', 'project1-service'
 
+  # Primary Container Parameters (Required)
   ContainerName:
     Type: String
-    Description: |
-      Name of the primary container within the task definition.
-      Must match the container name expected by CI/CD pipelines for deployments.
-      Example: 'app-container', 'project1-container'
+    Description: Primary container name for single-container services
 
   ECRRepository:
     Type: String
-    Description: |
-      Name of the ECR repository containing the container image.
-      Repository must exist and contain a valid image tagged as 'latest'.
-      Example: 'portfolio-dev', 'project1-repo'
+    Description: ECR repository for primary container
 
   ContainerPort:
     Type: Number
-    Description: |
-      Port that the application listens on inside the container.
-      This is the port exposed by your application (e.g., Express.js on 3000).
+    Description: Port for primary container
 
   HostPort:
     Type: Number
-    Description: |
-      HostPort that the application listens on inside the container.
-      This is the port exposed by your application (e.g., Express.js on 3000).
+    Description: Host port for primary container
 
+  # Optional Secondary Container Parameters
+  SecondaryContainerName:
+    Type: String
+    Description: Name of secondary container (optional)
+    Default: ""
+
+  SecondaryECRRepository:
+    Type: String
+    Description: ECR repository for secondary container (optional)
+    Default: ""
+
+  SecondaryContainerPort:
+    Type: Number
+    Description: Port for secondary container
+    Default: 0
+
+  SecondaryHostPort:
+    Type: Number
+    Description: Host port for secondary container
+    Default: 0
+
+  SecondaryTargetGroupArn:
+    Type: String
+    Description: Target group ARN for secondary container (optional)
+    Default: ""
+
+  # Resource Parameters
   CPU:
     Type: Number
-    Description: |
-      CPU units allocated to the task (1024 units = 1 vCPU).
-      Adjust based on application requirements and expected load.
+    Description: Total CPU units for the task
     Default: 256
 
   Memory:
     Type: Number
-    Description: |
-      Memory in MB allocated to the task.
-      Should be sized based on application memory usage patterns.
+    Description: Total memory for the task
     Default: 512
+
+  # Primary container gets 60% of resources, secondary gets 40%
+  PrimaryCPU:
+    Type: Number
+    Description: CPU units for primary container (auto-calculated if 0)
+    Default: 0
+
+  SecondaryCPU:
+    Type: Number
+    Description: CPU units for secondary container (auto-calculated if 0)
+    Default: 0
+
+  PrimaryMemory:
+    Type: Number
+    Description: Memory for primary container (auto-calculated if 0)
+    Default: 0
+
+  SecondaryMemory:
+    Type: Number
+    Description: Memory for secondary container (auto-calculated if 0)
+    Default: 0
 
   DesiredCount:
     Type: Number
-    Description: |
-      Number of tasks to maintain running for this service.
-      Start with 1 for development, increase for production availability.
+    Description: Number of tasks to maintain running
     Default: 1
 
   TargetGroupArn:
     Type: String
-    Description: |
-      ARN of the ALB target group for this service.
-      Each service should have its own target group for proper routing.
-      Target group must be configured with appropriate health check settings.
+    Description: ARN of the ALB target group for primary container
 
   Region:
     Type: String
-    Description: |
-      AWS region for resource deployment.
-      Used for ECR repository URLs and CloudWatch log configuration.
+    Description: AWS region for deployment
 
   MigrationMode:
     Type: String
@@ -96,92 +117,137 @@ Parameters:
 
   ExportSuffix:
     Type: String
-    Description: Optional suffix for export names to avoid conflicts during migration
+    Description: Optional suffix for export names
     Default: ""
 
 Conditions:
   CreateNewLogGroup: !Equals [!Ref MigrationMode, "no-migrate"]
-  IsMigrationMode: !Equals [!Ref MigrationMode, "migrate"]
   HasExportSuffix: !Not [!Equals [!Ref ExportSuffix, ""]]
-  IsNextJS: !Equals [!Ref ProjectName, "Project1"] # Project1 uses Next.js
-  IsReact: !Equals [!Ref ProjectName, "Portfolio"] # Portfolio uses React
-  IsStatic: !Equals [!Ref ProjectName, "Project2"]
+  HasSecondaryContainer: !Not [!Equals [!Ref SecondaryContainerName, ""]]
+  HasSecondaryTargetGroup: !Not [!Equals [!Ref SecondaryTargetGroupArn, ""]]
+
+  CreateSecondaryLogGroup: !And
+    - !Equals [!Ref MigrationMode, "no-migrate"]
+    - !Not [!Equals [!Ref SecondaryContainerName, ""]]
+  # AutoCalculateResources: !And
+  #   - !Equals [!Ref PrimaryCPU, 0]
+  #   - !Equals [!Ref PrimaryMemory, 0]
 
 Resources:
-  # CloudWatch Log Group: Project-specific logging
-  LogGroup:
+  # Primary Container Log Group
+  PrimaryLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: CreateNewLogGroup # ✅ Only create if condition
+    Condition: CreateNewLogGroup
     DeletionPolicy: Retain
     Properties:
-      LogGroupName: !Sub "/ecs/${ProjectName}-task"
-      RetentionInDays: 7 # Adjust for production needs
+      LogGroupName: !Sub "/ecs/${ProjectName}-primary-task"
+      RetentionInDays: 7
 
-  # Task Definition: Container blueprint with project-specific configuration
+  # Secondary Container Log Group (conditional)
+  SecondaryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: CreateSecondaryLogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/ecs/${ProjectName}-secondary-task"
+      RetentionInDays: 7
+
+  # Task Definition with conditional multi-container support
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub "${ProjectName}-task" # More unique family name
-      Cpu: !Ref CPU # Configurable CPU allocation
-      Memory: !Ref Memory # Configurable memory allocation
+      Family: !Sub "${ProjectName}-task"
+      Cpu: !Ref CPU
+      Memory: !Ref Memory
       RequiresCompatibilities:
-        - EC2 # Use EC2 launch type
-      NetworkMode: bridge # Bridge networking for cost efficiency
-      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn # Shared execution role
+        - EC2
+      NetworkMode: bridge
+      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
+      ContainerDefinitions: !If
+        - HasSecondaryContainer
+        # Multi-container configuration
+        - - Name: !Ref ContainerName
+            Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
+            Cpu: 256
+            MemoryReservation: 512
+            Essential: true
+            PortMappings:
+              - ContainerPort: !Ref ContainerPort
+                HostPort: !Ref HostPort
+                Protocol: tcp
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Sub "/ecs/${ProjectName}-primary-task"
+                awslogs-region: !Ref Region
+                awslogs-stream-prefix: ecs
+                awslogs-create-group: "true"
+          - Name: !Ref SecondaryContainerName
+            Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${SecondaryECRRepository}:latest"
+            Cpu: 256
+            MemoryReservation: 512
+            Essential: true
+            PortMappings:
+              - ContainerPort: !Ref SecondaryContainerPort
+                HostPort: !Ref SecondaryHostPort
+                Protocol: tcp
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Sub "/ecs/${ProjectName}-secondary-task"
+                awslogs-region: !Ref Region
+                awslogs-stream-prefix: ecs
+                awslogs-create-group: "true"
+        # Single-container configuration
+        - - Name: !Ref ContainerName
+            Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
+            Cpu: !Ref CPU
+            MemoryReservation: !Ref Memory
+            Essential: true
+            PortMappings:
+              - ContainerPort: !Ref ContainerPort
+                HostPort: !Ref HostPort
+                Protocol: tcp
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Sub "/ecs/${ProjectName}-primary-task"
+                awslogs-region: !Ref Region
+                awslogs-stream-prefix: ecs
+                awslogs-create-group: "true"
 
-      ContainerDefinitions:
-        - Name: !Ref ContainerName # Project-specific container name
-          # Dynamic ECR image URL based on project parameters
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
-          Cpu: !Ref CPU # Container CPU allocation
-          MemoryReservation: !Ref Memory # Soft memory limit
-          Essential: true # Critical container for task health
-
-          PortMappings:
-            - ContainerPort: !Ref ContainerPort # Application port inside container
-              HostPort: !Ref HostPort
-              Protocol: tcp # TCP protocol for HTTP traffic
-
-          # Project-specific CloudWatch logging
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Sub "/ecs/${ProjectName}-task"
-              awslogs-region: !Ref Region
-              awslogs-stream-prefix: ecs
-              awslogs-create-group: "true"
-
-  # ECS Service: Manages running tasks with project-specific configuration
+  # ECS Service with conditional load balancer configuration
   ECSService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: !Ref ServiceName # Project-specific service name
-      Cluster: !ImportValue ECSClusterName # Shared ECS cluster
-      DesiredCount: !Ref DesiredCount # Configurable task count
-      LaunchType: EC2 # EC2 launch type
-      TaskDefinition: !Ref TaskDefinition # Reference to project task definition
-
-      # Load Balancer Integration: Connect to project-specific target group
-      LoadBalancers:
-        - ContainerName: !Ref ContainerName # Must match task definition
-          ContainerPort: !Ref ContainerPort # Application port
-          TargetGroupArn: !Ref TargetGroupArn # Project-specific target group
-
-      # Service Configuration
+      ServiceName: !Ref ServiceName
+      Cluster: !ImportValue ECSClusterName
+      DesiredCount: !Ref DesiredCount
+      LaunchType: EC2
+      TaskDefinition: !Ref TaskDefinition
+      LoadBalancers: !If
+        - HasSecondaryTargetGroup
+        # Multi-container load balancers
+        - - ContainerName: !Ref ContainerName
+            ContainerPort: !Ref ContainerPort
+            TargetGroupArn: !Ref TargetGroupArn
+          - ContainerName: !Ref SecondaryContainerName
+            ContainerPort: !Ref SecondaryContainerPort
+            TargetGroupArn: !Ref SecondaryTargetGroupArn
+        # Single-container load balancer
+        - - ContainerName: !Ref ContainerName
+            ContainerPort: !Ref ContainerPort
+            TargetGroupArn: !Ref TargetGroupArn
       EnableECSManagedTags: true
       DeploymentController:
-        Type: ECS # Standard ECS rolling deployment
-      HealthCheckGracePeriodSeconds: 180 # Startup time allowance
-
-      # Deployment Strategy: Safe for single-instance development
+        Type: ECS
+      HealthCheckGracePeriodSeconds: 180
       DeploymentConfiguration:
-        MaximumPercent: 200 # Allow extra tasks during deployment
-        MinimumHealthyPercent: 50 # Maintain some capacity during updates
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
         DeploymentCircuitBreaker:
           Enable: true
           Rollback: true
-
-      # Service tags with project identification
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -192,38 +258,17 @@ Resources:
 
 Outputs:
   ECSServiceName:
-    Description: |
-      Name of the ECS service created by this template.
-      Used by CI/CD pipelines for deployment updates and by monitoring tools
-      for service health tracking and management operations.
-    Value: !Ref ECSService
+    Description: Name of the ECS service
+    Value: !Ref ServiceName # Return service name, not ARN
     Export:
       Name: !Sub "${ProjectName}ECSServiceName"
 
   ECSServiceArn:
-    Description: |
-      ARN of the ECS service created by this template.
-      Can be used for IAM policies, monitoring integrations, and other
-      AWS services that require service ARN references.
+    Description: ARN of the ECS service
     Value: !Ref ECSService
+    Export:
+      Name: !Sub "${ProjectName}ECSServiceArn"
 
   TaskDefinitionArn:
-    Description: |
-      ARN of the task definition created by this template.
-      Useful for debugging, rollbacks, or creating additional services
-      with the same container configuration.
+    Description: ARN of the task definition
     Value: !Ref TaskDefinition
-
-  # Conditional output - only export if LogGroup was created
-  LogGroupName:
-    Condition: CreateNewLogGroup #
-    Description: |
-      CloudWatch log group name for container logs.
-      Use this for configuring log aggregation, monitoring dashboards,
-      or setting up log-based alarms and notifications.
-    Value: !Ref LogGroup
-    Export:
-      Name: !If
-        - HasExportSuffix
-        - !Sub "${ProjectName}LogGroupName${ExportSuffix}"
-        - !Sub "${ProjectName}LogGroupName"

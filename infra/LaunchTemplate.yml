@@ -130,16 +130,16 @@ Resources:
 
             # ECS agent communication
         - IpProtocol: tcp
-          FromPort: 51678
-          ToPort: 51678
+          FromPort: 3002
+          ToPort: 3002
           SourceSecurityGroupId: !ImportValue LoadBalancerSGId
 
         # API/Backend port: Common port for backend services
-        # - IpProtocol: tcp
-        #   FromPort: 4000
-        #   ToPort: 4000
-        #   CidrIp: 0.0.0.0/0
-        #   Description: "Backend/API service port"
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          CidrIp: 0.0.0.0/0
+          Description: "Backend/API service port"
 
       SecurityGroupEgress:
         # HTTPS for ECS API calls and ECR

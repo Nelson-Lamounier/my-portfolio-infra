@@ -17,6 +17,7 @@ Resources:
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub "${ProjectName}-TaskExecutionRole"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -26,6 +27,21 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-TaskExecutionPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - DescribeLogGroups
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${Region}:${AWS::AccountId}:log-group:/ecs/*"
+                  - !Sub "arn:aws:logs:${Region}:${AWS::AccountId}:log-group:/aws/ecs/*:log-stream:*"
 
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup

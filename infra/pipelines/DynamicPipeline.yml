@@ -29,6 +29,12 @@ Parameters:
       Should be pre-created and accessible by the pipeline role.
     Default: "infra/"
 
+    # Optional secondary service for full-stack applications
+  SecondaryServiceName:
+    Type: String
+    Description: Name of the secondary ECS service (for full-stack apps)
+    Default: ""
+
   ServiceName:
     Type: String
     Description: |
@@ -69,6 +75,12 @@ Parameters:
       image to update during deployment. Must match exactly with the task definition.
       If unsure, check your ECS task definition in the AWS Console.
 
+  # Optional secondary container for full-stack applications
+  SecondaryContainerName:
+    Type: String
+    Description: Secondary container name (for full-stack apps)
+    Default: ""
+
   ECRRepositoryName:
     Type: String
     Description: |
@@ -77,24 +89,30 @@ Parameters:
       naming conventions (lowercase, hyphen-separated).
       Examples: 'portfolio-app', 'ecommerce-frontend', 'api-backend'
 
+    # Optional secondary ECR repository for full-stack applications
+  SecondaryECRRepositoryName:
+    Type: String
+    Description: Name of the secondary ECR repository (for full-stack apps)
+    Default: ""
+
   TemplateBucket:
     Type: String
     Description: |
       S3 bucket containing CloudFormation templates.
       Used by nested stacks to reference IAM policy templates.
 
-  # BuildSpecOverride:
-  #   Type: String
-  #   Description: |
-  #     Optional custom BuildSpec configuration for specialised build requirements.
-  #     When provided, overrides the default Docker build process.
-  #     Use for projects requiring custom build steps, multiple Dockerfiles,
-  #     or complex build environments. Leave empty to use default BuildSpec.
-  #   Default: ""
+  # Project type to determine build strategy
+  ProjectType:
+    Type: String
+    Description: Type of project (single-container or full-stack)
+    Default: "single-container"
+    AllowedValues:
+      - "single-container"
+      - "full-stack"
 
-# Conditional Logic: Determine whether to use custom or default BuildSpec
-# Conditions:
-#   HasCustomBuildSpec: !Not [!Equals [!Ref BuildSpecOverride, ""]]
+Conditions:
+  IsFullStack: !Equals [!Ref ProjectType, "full-stack"]
+  HasSecondaryService: !Not [!Equals [!Ref SecondaryServiceName, ""]]
 
 Resources:
   # # Nested Stack: CodeBuild IAM Policies
@@ -112,7 +130,7 @@ Resources:
       Artifacts:
         Type: CODEPIPELINE
       Environment:
-        ComputeType: BUILD_GENERAL1_SMALL
+        ComputeType: BUILD_GENERAL1_MEDIUM
         Image: aws/codebuild/standard:7.0
         Type: LINUX_CONTAINER
         PrivilegedMode: true
@@ -127,6 +145,12 @@ Resources:
           # Pass container name to buildspec
           - Name: CONTAINER_NAME
             Value: !Ref ContainerName
+          # Conditional environment variables for full-stack
+          - Name: SECONDARY_ECR_REPOSITORY_NAME
+            Value:
+              !If [HasSecondaryContainer, !Ref SecondaryECRRepositoryName, ""]
+          - Name: SECONDARY_CONTAINER_NAME
+            Value: !If [HasSecondaryContainer, !Ref SecondaryContainerName, ""]
       ServiceRole: !ImportValue Portfolio-CodeBuildRoleArn
 
   # CodePipeline: Orchestrates the complete CI/CD workflow
@@ -184,23 +208,37 @@ Resources:
 
         # Stage 3: ECS Deployment
         - Name: Deploy
-          Actions:
-            - Name: DeployECS
-              ActionTypeId:
-                Category: Deploy
-                Owner: AWS
-                Provider: ECS # Native ECS deployment action
-                Version: 1
-              InputArtifacts:
-                # Build artifacts containing deployment manifest
-                - Name: BuildOutput
-              Configuration:
-                # Target ECS cluster (imported from infrastructure stack)
-                ClusterName: !ImportValue ECSClusterName
-                # Target ECS service for container updates
-                ServiceName: !Ref ServiceName
-                # Deployment manifest specifying container image updates
-                FileName: imagedefinitions.json
+          Actions: !If
+            - - Name: DeployECS
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: ECS # Native ECS deployment action
+                  Version: 1
+                InputArtifacts:
+                  # Build artifacts containing deployment manifest
+                  - Name: BuildOutput
+                Configuration:
+                  # Target ECS cluster (imported from infrastructure stack)
+                  ClusterName: !ImportValue ECSClusterName
+                  # Target ECS service for container updates
+                  ServiceName: !Ref ServiceName
+                  # Deployment manifest specifying container image updates
+                  FileName: imagedefinitions.json
+
+            # Single-container fallback
+            - - Name: DeployECS
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: ECS
+                  Version: 1
+                InputArtifacts:
+                  - Name: BuildOutput
+                Configuration:
+                  ClusterName: !ImportValue ECSClusterName
+                  ServiceName: !Ref ServiceName
+                  FileName: imagedefinitions.json
 
 Outputs:
   PipelineName:
