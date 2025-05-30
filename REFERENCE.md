@@ -427,3 +427,76 @@ MY_IP=$(curl -s ifconfig.me)
 # Update .env with your specific IP
 
 CIDR_IP=${MY_IP}/32
+
+# Daily workflow
+
+make validate # Validate templates
+make security-check # Check security compliance
+make format # Format templates
+make deploy-infra # Deploy infrastructure
+
+# CI/CD workflow
+
+make pre-commit # Run all checks before committing
+
+# Rain specific commands
+
+rain forecast infra/DynamicLoadBalancer.yml # Preview changes
+rain deploy vpc-stack --yes # Deploy with auto-approval
+rain watch portfolio-service # Watch stack events
+rain logs portfolio-service # View logs
+
+# Convert all leading 4-space indentation to tabs
+
+sed -i '' 's/^ /\t/g' Makefile
+
+# Install all required tools
+
+make install
+
+# Daily development workflow
+
+make dev # Format, validate, preview
+make quick-deploy # Quick deployment
+
+# Production workflow
+
+make pre-commit # Run all checks before committing
+make prod # Deploy to production (with confirmation)
+
+# Monitoring and debugging
+
+make status # Check stack status
+make logs # View recent events
+make outputs # Show stack outputs
+make watch # Watch deployment in real-time
+
+# Health checks
+
+make doctor # Comprehensive health check
+
+# Cleanup
+
+make clean # Clean local artifacts
+make delete # Delete entire stack (with confirmation)
+
+# Create the scripts directory
+
+mkdir -p scripts
+chmod +x scripts/\*.sh # After creating the scripts
+
+# From your my-portfolio-infra directory, run:
+
+# Complete File Structure
+
+find . -type f -name "_.yml" -o -name "_.yaml" -o -name "_.json" -o -name "_.md" -o -name "_.sh" -o -name "Makefile" -o -name "_.env\*" | sort
+
+# Tree Structure (if you have tree installed)
+
+tree my-portfolio-infra -I 'node_modules|.git|\*.log'
+
+# Basic structure
+
+ls -la my-portfolio-infra/
+ls -la my-portfolio-infra/infra/
+ls -la my-portfolio-infra/infra/\*/

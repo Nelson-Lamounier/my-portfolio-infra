@@ -1,0 +1,66 @@
+#
+# Security Baseline Rules for Portfolio Infrastructure
+#
+
+# Rule: All S3 buckets must have versioning enabled
+let s3_buckets = Resources.*[ Type == 'AWS::S3::Bucket' ]
+rule s3_versioning when %s3_buckets !empty {
+    %s3_buckets.Properties.VersioningConfiguration.Status == "Enabled"
+    <<
+        Violation: S3 bucket versioning must be enabled
+        Fix: Add VersioningConfiguration.Status: "Enabled" to S3 bucket properties
+    >>
+}
+
+# Rule: All security groups must not allow unrestricted access (0.0.0.0/0) on sensitive ports
+let security_groups = Resources.*[ Type == 'AWS::EC2::SecurityGroup' ]
+rule restrict_sensitive_ports when %security_groups !empty {
+    %security_groups.Properties.SecurityGroupIngress[*] {
+        when CidrIp == "0.0.0.0/0" {
+            FromPort != 22 <<Violation: SSH (22) should not be open to 0.0.0.0/0>>
+            FromPort != 3389 <<Violation: RDP (3389) should not be open to 0.0.0.0/0>>
+            FromPort != 1433 <<Violation: SQL Server (1433) should not be open to 0.0.0.0/0>>
+            FromPort != 3306 <<Violation: MySQL (3306) should not be open to 0.0.0.0/0>>
+            FromPort != 5432 <<Violation: PostgreSQL (5432) should not be open to 0.0.0.0/0>>
+        }
+    }
+}
+
+# Rule: Load balancers must have access logging enabled
+let albs = Resources.*[ Type == 'AWS::ElasticLoadBalancingV2::LoadBalancer' ]
+rule alb_access_logging when %albs !empty {
+    %albs.Properties.LoadBalancerAttributes[*] {
+        when Key == "access_logs.s3.enabled" {
+            Value == "true" <<Violation: ALB access logging must be enabled>>
+        }
+    }
+}
+
+# Rule: ECS task definitions must not run as root
+let task_definitions = Resources.*[ Type == 'AWS::ECS::TaskDefinition' ]
+rule ecs_no_root_user when %task_definitions !empty {
+    %task_definitions.Properties.ContainerDefinitions[*] {
+        User != "root" or 
+        User != "0" or 
+        !exists User <<Violation: ECS containers should not run as root user>>
+    }
+}
+
+# Rule: All IAM roles must have session duration limits
+let iam_roles = Resources.*[ Type == 'AWS::IAM::Role' ]
+rule iam_session_duration when %iam_roles !empty {
+    %iam_roles.Properties {
+        when exists MaxSessionDuration {
+            MaxSessionDuration <= 43200 <<Violation: IAM role session duration should not exceed 12 hours>>
+        }
+    }
+}
+
+# Rule: CloudWatch log groups must have retention period set
+let log_groups = Resources.*[ Type == 'AWS::Logs::LogGroup' ]
+rule log_retention when %log_groups !empty {
+    %log_groups.Properties {
+        exists RetentionInDays <<Violation: CloudWatch log groups must have retention period set>>
+        RetentionInDays <= 90 <<Violation: Log retention should not exceed 90 days for cost optimization>>
+    }
+}

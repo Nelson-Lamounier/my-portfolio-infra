@@ -241,7 +241,7 @@ Resources:
         ContainerName: !Ref PortfolioContainerName
         ECRRepository: !Ref PortfolioECRRepository
         ContainerPort: 80
-        HostPort: 80
+        HostPort: 0
         CPU: 256
         Memory: 512
         DesiredCount: 1
@@ -275,7 +275,7 @@ Resources:
         ContainerName: project1-container
         ECRRepository: !Ref Project1ECRRepository
         ContainerPort: 3000
-        HostPort: 3000
+        HostPort: 0
         CPU: 128
         Memory: 256
         DesiredCount: 1
@@ -309,7 +309,7 @@ Resources:
         ContainerName: project2-container
         ECRRepository: !Ref Project2ECRRepository
         ContainerPort: 3001
-        HostPort: 3001
+        HostPort: 0
         CPU: 128
         Memory: 256
         DesiredCount: 1
@@ -344,17 +344,21 @@ Resources:
         ContainerName: project-frontend-ecomm-container
         ECRRepository: frontend-ecomm-dev
         ContainerPort: 3002
-        HostPort: 3002
+        HostPort: 0
+        CPU: 128
+        Memory: 256
+        DesiredCount: 1
         TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.ProjectFrontendEcommTargetGroupArn
         # Secondary container (Backend)
         SecondaryContainerName: project-backend-ecomm-container
         SecondaryECRRepository: backend-ecomm-dev
         SecondaryContainerPort: 4000
-        SecondaryHostPort: 4000
+        SecondaryHostPort: 0
+        CPU: 128
+        Memory: 256
+        DesiredCount: 1
         SecondaryTargetGroupArn: !GetAtt LoadBalancerStack.Outputs.ProjectBackendEcommTargetGroupArn
         # Resources
-        CPU: 512
-        Memory: 1024
         Region: !Ref Region
         MigrationMode: !Ref MigrationMode
         ExportSuffix: V1

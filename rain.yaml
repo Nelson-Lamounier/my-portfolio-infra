@@ -1,0 +1,70 @@
+# @format
+---
+# Rain configuration for Portfolio Infrastructure
+project: portfolio-infrastructure
+region: eu-west-1
+
+# Default parameters for all stacks
+parameters:
+  Environment: dev
+  Region: eu-west-1
+
+# Stack definitions
+stacks:
+  # Core Infrastructure
+  vpc-stack:
+    template: infra/vpc/VPCStack.yml
+    parameters:
+      CidrIp: "0.0.0.0/0"
+
+  cluster-stack:
+    template: infra/cluster/ECSClusterStack.yml
+    depends_on: [vpc-stack]
+
+  loadbalancer-stack:
+    template: infra/DynamicLoadBalancer.yml
+    depends_on: [vpc-stack]
+    parameters:
+      LoadBalancerName: PortfolioALB
+      EnableHTTPS: "true"
+      ServicesConfig: |
+        [
+          {
+            "name": "portfolio",
+            "port": 80,
+            "domains": ["yourdomain.com", "www.yourdomain.com"],
+            "priority": 100,
+            "enabled": true
+          },
+          {
+            "name": "project1",
+            "port": 3001,
+            "domains": ["project1.yourdomain.com"],
+            "priority": 200,
+            "enabled": true
+          }
+        ]
+
+  # Service Stacks
+  portfolio-service:
+    template: infra/services/DynamicService.yml
+    depends_on: [cluster-stack, loadbalancer-stack]
+    parameters:
+      ProjectName: Portfolio
+      ServiceName: portfolio-service
+      ContainerName: portfolio-container
+      ECRRepository: portfolio-app
+      ContainerPort: 80
+      HostPort: 80
+
+# Deployment groups
+deployment_groups:
+  infrastructure:
+    - vpc-stack
+    - cluster-stack
+    - loadbalancer-stack
+
+  services:
+    - portfolio-service
+    - project1-service
+    - project2-service

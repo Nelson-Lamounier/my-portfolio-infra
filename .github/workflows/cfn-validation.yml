@@ -1,0 +1,41 @@
+# @format
+
+name: CloudFormation Validation
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rain
+        run: |
+          curl -L https://github.com/aws-cloudformation/rain/releases/latest/download/rain_linux_amd64.zip -o rain.zip
+          unzip rain.zip
+          sudo mv rain /usr/local/bin/
+
+      - name: Install CFN Guard
+        run: |
+          curl -L https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-v3-ubuntu-latest.tar.gz -o cfn-guard.tar.gz
+          tar -xzf cfn-guard.tar.gz
+          sudo mv cfn-guard /usr/local/bin/
+
+      - name: Validate Templates
+        run: make validate
+
+      - name: Security Check
+        run: make security-check
+
+      - name: Upload Reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: validation-reports
+          path: reports/

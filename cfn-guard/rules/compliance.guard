@@ -1,0 +1,32 @@
+#
+# Compliance and Best Practices Rules
+#
+
+# Rule: All resources must be properly tagged
+let all_resources = Resources.*[
+    Type == 'AWS::EC2::SecurityGroup' or
+    Type == 'AWS::ElasticLoadBalancingV2::LoadBalancer' or
+    Type == 'AWS::ECS::Service' or
+    Type == 'AWS::ECS::Cluster'
+]
+
+rule mandatory_tags when %all_resources !empty {
+    %all_resources.Properties {
+        exists Tags <<Violation: All resources must have tags>>
+        Tags[*] {
+            exists Key
+            exists Value
+            Key in ["Name", "Environment", "Project", "Owner"] <<Violation: Must include mandatory tags>>
+        }
+    }
+}
+
+# Rule: ECS services must have deployment circuit breaker enabled
+let ecs_services = Resources.*[ Type == 'AWS::ECS::Service' ]
+rule ecs_circuit_breaker when %ecs_services !empty {
+    %ecs_services.Properties.DeploymentConfiguration {
+        exists DeploymentCircuitBreaker <<Violation: ECS services must have circuit breaker enabled>>
+        DeploymentCircuitBreaker.Enable == true
+        DeploymentCircuitBreaker.Rollback == true
+    }
+}
