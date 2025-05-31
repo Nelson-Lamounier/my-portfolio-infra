@@ -2,63 +2,90 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: |
-  Reusable CodePipeline IAM Role and Policies Template
+  Ultra-Dynamic CodePipeline IAM Role and Policies Template for Multi-Environment Support
 
-  This template creates a standardized IAM role with comprehensive permissions for CodePipeline
-  to orchestrate CI/CD workflows including source control integration, build orchestration,
-  and ECS deployments.
-
-  The role enables CodePipeline to:
-  - Pull source code from GitHub via CodeStar connections
-  - Trigger and monitor CodeBuild projects
-  - Deploy containerized applications to ECS services
-  - Manage artifacts through S3 storage
-  - Access deployment configuration from SSM Parameter Store
+  This template creates environment-specific IAM roles with dynamic permissions 
+  based on environment configuration, eliminating code duplication while ensuring
+  proper security isolation between dev, staging, and production environments.
 
 Parameters:
-  ArtifactBucket:
-    Description: |
-      S3 bucket name for storing CodePipeline artifacts between stages.
-      This bucket acts as the central storage for source code, build outputs,
-      and deployment artifacts as they flow through the pipeline stages.
+  # Environment Parameter - Core for all resource naming
+  Environment:
     Type: String
+    Description: Environment name for resource naming and permission isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
 
+  # Project Configuration
   ProjectName:
-    Description: |
-      Unique project identifier for creating distinct role names across multiple pipelines.
-      Examples: 'Portfolio', 'Project1', 'EcommerceApp'
-      Used to prevent naming conflicts when deploying multiple pipeline stacks.
+    Type: String
+    Description: Unique project identifier for creating distinct role names
+    Default: "Portfolio"
+
+  # Infrastructure Configuration
+  ArtifactBucket:
+    Description: S3 bucket name for storing pipeline artifacts (will be environment-specific)
     Type: String
 
+  # CodeStar Connection Configuration
   ConnectionArn:
-    Description: |
-      ARN of the CodeStar connection for GitHub integration.
-      This connection enables secure, token-based authentication between AWS and GitHub
-      without storing credentials directly in the pipeline configuration.
-      Format: arn:aws:codeconnections:region:account:connection/connection-id
+    Description: ARN of the CodeStar connection for GitHub integration
     Type: String
 
+  # Optional Task Execution Role
   TaskExecutionRoleArn:
-    Description: |
-      ARN of the ECS Task Execution Role. If not provided, will use wildcard permissions.
+    Description: ARN of the ECS Task Execution Role
     Type: String
     Default: ""
 
+  # KMS Configuration
+  KMSKeyArn:
+    Description: KMS key ARN for encrypting artifacts and parameters
+    Type: String
+    Default: ""
+
+Mappings:
+  # Environment-specific configurations
+  EnvironmentMap:
+    dev:
+      LogRetentionDays: 7
+      ArtifactRetentionDays: 30
+      RequireApproval: false
+      AllowCrossRegion: true
+    staging:
+      LogRetentionDays: 14
+      ArtifactRetentionDays: 60
+      RequireApproval: true
+      AllowCrossRegion: true
+    production:
+      LogRetentionDays: 90
+      ArtifactRetentionDays: 365
+      RequireApproval: true
+      AllowCrossRegion: false
+
 Conditions:
-  HasTaskExecutionRole: !Not
-    - !Equals
-      - !Ref TaskExecutionRoleArn
-      - ""
+  # Environment-specific conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsStaging: !Equals [!Ref Environment, "staging"]
+  IsDevelopment: !Equals [!Ref Environment, "dev"]
+  
+  # Feature conditions
+  HasTaskExecutionRole: !Not [!Equals [!Ref TaskExecutionRoleArn, ""]]
+  HasKMSKey: !Not [!Equals [!Ref KMSKeyArn, ""]]
+  RequiresApproval: !FindInMap [EnvironmentMap, !Ref Environment, RequireApproval]
+  AllowsCrossRegion: !FindInMap [EnvironmentMap, !Ref Environment, AllowCrossRegion]
 
 Resources:
+  # Enhanced CodePipeline Role with better security
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
-
-      # Unique role naming prevents conflicts between multiple project pipelines
-      RoleName: !Sub ${ProjectName}-CodePipelineRole
-
-      # Trust relationship: Allow CodePipeline service to assume this role during execution
+      # Environment-specific role naming
+      RoleName: !Sub "${ProjectName}-CodePipelineRole-${Environment}"
+      Path: !Sub "/${Environment}/"
+      Description: !Sub "CodePipeline IAM role for ${ProjectName} in ${Environment}"
+      
+      # Enhanced trust policy with stricter conditions
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -66,163 +93,187 @@ Resources:
             Principal:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:RequestedRegion": !Ref AWS::Region
+                "aws:userid": !Sub "${AWS::AccountId}:*"
+              IpAddress:
+                "aws:SourceIp": 
+                  - "52.0.0.0/8"  # AWS IP ranges
+                  - "54.0.0.0/8"
+
+      # Add permissions boundary for production
+      PermissionsBoundary: !If
+        - IsProduction
+        - !Sub "arn:aws:iam::${AWS::AccountId}:policy/${ProjectName}-PipelineBoundary-${Environment}"
+        - !Ref AWS::NoValue
+
+      # Enhanced session duration
+      MaxSessionDuration: !If [IsProduction, 14400, 7200]  # 4 hours for prod, 2 hours for dev
+
       Policies:
-
-        # SSM Parameter Access: Secure retrieval of sensitive configuration values
-        - PolicyName: SSMParameterAccess
+        # Enhanced S3 Access Policy with better conditions
+        - PolicyName: !Sub "S3Access-${Environment}"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${ArtifactBucket}-${Environment}"
+                  - !Sub "arn:aws:s3:::${ArtifactBucket}-${Environment}/*"
+                Condition:
+                  StringEquals:
+                    "s3:ExistingObjectTag/Environment": !Ref Environment
+              
+              # Enhanced KMS permissions with conditions
+              - !If
+                - HasKMSKey
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:GenerateDataKey
+                    - kms:DescribeKey
+                  Resource: !Ref KMSKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "s3.${AWS::Region}.amazonaws.com"
+                - !Ref AWS::NoValue
 
-                  # Retrieve GitHub personal access token for repository access
+        # Enhanced ECS Access Policy with tighter scoping
+        - PolicyName: !Sub "ECSAccess-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:DescribeClusters
+                Resource:
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${Environment}-*"
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${Environment}-*:*"
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ProjectName}-*-${Environment}"
+                Condition:
+                  StringEquals:
+                    "ecs:cluster": !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ProjectName}-ECSCluster-${Environment}"
+
+        # Enhanced SSM Parameter Access Policy with path restrictions
+        - PolicyName: !Sub "SSMAccess-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
                   - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
                 Resource:
+                  # Environment-specific parameters only
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Environment}/*"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Environment}/${ProjectName}/*"
+                Condition:
+                  StringEquals:
+                    "ssm:SourceIp": 
+                      - "52.0.0.0/8"  # AWS IP ranges only
 
-                  # GitHub token used for repository operations and webhook configuration
-                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
-
-        # S3 Artifact Management: Handle pipeline artifacts and intermediate files
-        - PolicyName: S3Access
+        # Enhanced IAM PassRole Policy with strict resource limits
+        - PolicyName: !Sub "IAMPassRole-${Environment}"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject # Download artifacts from previous pipeline stages
-                  - s3:PutObject # Store artifacts for subsequent stages
-                  - s3:ListBucket # Browse bucket contents for artifact discovery
-                Resource:
-
-                  # Scoped to specific artifact bucket to follow least privilege principle
-                  - !Sub arn:aws:s3:::${ArtifactBucket}
-                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
-
-        # ECS Deployment Permissions: Complete access for container application deployments
-        - PolicyName: ECSAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-
-              # Core ECS Operations: Service and task management for deployments
-              - Effect: Allow
-                Action:
-
-                  # Service Management: Required for updating running applications
-                  - ecs:DescribeServices # Check current service status and configuration
-                  - ecs:UpdateService # Deploy new task definitions to services
-                  - ecs:CreateService # Create new services during initial deployment
-                  - ecs:DeleteService # Remove services during cleanup operations
-                  - ecs:ListServices # Discover existing services in cluster
-
-                  # Task Definition Management: Handle application container specifications
-                  - ecs:DescribeTaskDefinition # Read current task definition details
-                  - ecs:RegisterTaskDefinition # Register new versions with updated images
-                  - ecs:ListTaskDefinitions # Browse available task definition versions
-
-                  # Cluster Operations: Manage deployment targets
-                  - ecs:DescribeClusters # Verify cluster exists and is healthy
-                  - ecs:ListClusters # Discover available deployment targets
-
-                  # Task Runtime Management: Monitor and control running containers
-                  - ecs:ListTasks # Monitor running tasks during deployment
-                  - ecs:DescribeTasks # Get detailed task status and health
-                  - ecs:RunTask # Execute one-off tasks (migrations, etc.)
-                  - ecs:StopTask # Terminate unhealthy or old tasks
-
-                  # Resource Tagging: Organize and track deployed resources
-                  - ecs:TagResource # Apply tags to ECS resources
-                  - ecs:UntagResource # Remove outdated tags
-                  - ecs:ListTagsForResource # Audit current resource tags
-
-                # Global resource access needed due to ECS cross-service dependencies
-                Resource: '*'
-
-              # Auto Scaling Integration: Handle dynamic capacity adjustments
-              - Effect: Allow
-                Action:
-
-                  # Full auto scaling permissions for ECS service scaling policies
-                  - application-autoscaling:*
-
-                # Auto scaling policies can be applied to various resource types
-                Resource: '*'
-
-              # CloudWatch Logs: Monitor deployment process and application logs
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup # Create log groups for new applications
-                  - logs:DescribeLogGroups # Verify log group configuration
-                  - logs:PutLogEvents # Write deployment events to logs
-                  - logs:DescribeLogStreams # Monitor log stream creation and status
-
-                # Log group names are dynamic and managed by ECS service
-                Resource: '*'
-
-              # CodeBuild Integration: Orchestrate build processes within pipeline
-              - Effect: Allow
-                Action:
-                  - codebuild:StartBuild # Trigger build projects for compilation/testing
-                  - codebuild:BatchGetBuilds # Monitor build progress and status
-                  - codebuild:BatchGetProjects # Validate build project configuration
-
-                # Build projects may be created dynamically across multiple projects
-                Resource: '*'
-
-        # IAM Role Passing: Enable ECS to use task execution roles for container operations
-        - PolicyName: IAMPassRole
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-
-                  # Allow CodePipeline to pass execution roles to ECS tasks
                   - iam:PassRole
                 Resource:
+                  - !If
+                    - HasTaskExecutionRole
+                    - !Ref TaskExecutionRoleArn
+                    - !Sub "arn:aws:iam::${AWS::AccountId}:role/${Environment}/*TaskExecutionRole"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole"
+                Condition:
+                  StringEquals:
+                    "iam:PassedToService": "ecs-tasks.amazonaws.com"
 
-                  # Specific task execution role created by ECS cluster infrastructure
-                  # This role is used by ECS to pull container images and write logs
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/*TaskExecutionRole*
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole
-                  - !Sub arn:aws:iam::${AWS::AccountId}:role/*-TaskExecutionRole
-
-        # Source Control Integration: Secure access to GitHub repositories
-        - PolicyName: SourceAccess
+        # Enhanced Source Control Access Policy
+        - PolicyName: !Sub "SourceAccess-${Environment}"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-
-                  # Use existing CodeStar connection for repository operations
                   - codestar-connections:UseConnection
-
-                  # Pass connection credentials to CodePipeline service actions
                   - codestar-connections:PassConnection
+                Resource: !Ref ConnectionArn
+                Condition:
+                  StringEquals:
+                    "codestar-connections:ProviderType": "GitHub"
 
-                  # Scoped to specific connection to prevent unauthorized repository access
-                  - codestar-connections:GetConnection
-                  - codestar-connections:ListConnections
-                Resource:
-                  - !Sub arn:aws:codeconnections:eu-west-1:${AWS::AccountId}:connection/*
-                  - !Sub arn:aws:codeconnections:eu-west-2:${AWS::AccountId}:connection/*
-                  - !Ref ConnectionArn
+        # Production-specific enhanced audit policy
+        - !If
+          - IsProduction
+          - PolicyName: "ProductionAuditAccess"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - cloudtrail:LookupEvents
+                  Resource: "*"
+                  Condition:
+                    DateGreaterThan:
+                      "aws:CurrentTime": "2024-01-01T00:00:00Z"
+                - Effect: Allow
+                  Action:
+                    - cloudwatch:PutMetricData
+                  Resource: !Sub "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:metric/Custom/Pipeline/*"
+                - Effect: Allow
+                  Action:
+                    - sns:Publish
+                  Resource: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-*-${Environment}"
+          - !Ref AWS::NoValue
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-CodePipelineRole-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "CodePipeline IAM Role"
+        - Key: ManagedBy
+          Value: "CloudFormation"
 
 Outputs:
+  # Environment-specific outputs
   CodePipelineRoleArn:
-    Description: |
-      ARN of the created CodePipeline IAM role.
-
-      This role ARN is consumed by pipeline templates to grant CodePipeline
-      the necessary permissions for end-to-end CI/CD operations.
-
-      The role enables secure, automated deployments while maintaining
-      the principle of least privilege through scoped permissions.
+    Description: ARN of the CodePipeline IAM role
     Value: !GetAtt CodePipelineRole.Arn
     Export:
+      Name: !Sub "${ProjectName}-CodePipelineRoleArn-${Environment}"
 
-      # Project-specific export name prevents conflicts between multiple pipeline stacks
-      # Format: {ProjectName}-CodePipelineRoleArn (e.g., Portfolio-CodePipelineRoleArn)
-      Name: Portfolio-CodePipelineRoleArn
+  CodePipelineRoleName:
+    Description: Name of the CodePipeline IAM role
+    Value: !Ref CodePipelineRole
+    Export:
+      Name: !Sub "${ProjectName}-CodePipelineRoleName-${Environment}"
+
+  EnvironmentRoleInfo:
+    Description: Environment-specific role configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Project: ${ProjectName}
+      Role: ${CodePipelineRole}
+      Artifact Bucket: ${ArtifactBucket}-${Environment}
+      Log Retention: ${EnvironmentMap.${Environment}.LogRetentionDays} days
+    Export:
+      Name: !Sub "CodePipelineRoleInfo-${Environment}"

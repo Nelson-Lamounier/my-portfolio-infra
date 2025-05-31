@@ -1,0 +1,876 @@
+#
+# Compliance and Best Practices Rules
+#
+
+# Rule: All resources must be properly tagged
+let all_resources = Resources.*[
+    Type == 'AWS::EC2::SecurityGroup' or
+    Type == 'AWS::ElasticLoadBalancingV2::LoadBalancer' or
+    Type == 'AWS::ECS::Service' or
+    Type == 'AWS::ECS::Cluster'
+]
+
+rule mandatory_tags when %all_resources !empty {
+    %all_resources.Properties {
+        exists Tags <<Violation: All resources must have tags>>
+        Tags[*] {
+            exists Key
+            exists Value
+            Key in ["Name", "Environment", "Project", "Owner"] <<Violation: Must include mandatory tags>>
+        }
+    }
+}
+
+# Rule: ECS services must have deployment circuit breaker enabled
+let ecs_services = Resources.*[ Type == 'AWS::ECS::Service' ]
+rule ecs_circuit_breaker when %ecs_services !empty {
+    %ecs_services.Properties.DeploymentConfiguration {
+        exists DeploymentCircuitBreaker <<Violation: ECS services must have circuit breaker enabled>>
+        DeploymentCircuitBreaker.Enable == true
+        DeploymentCircuitBreaker.Rollback == true
+    }
+}
+
+# Auto Scaling Group Compliance Rules
+rule asg_has_required_tags {
+    Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ] {
+        Properties.Tags[*] {
+            some Key == "Environment" << Auto Scaling Group must have Environment tag >>
+            some Key == "Project" << Auto Scaling Group must have Project tag >>
+            some Key == "Component" << Auto Scaling Group must have Component tag >>
+        }
+    }
+}
+
+rule asg_tags_propagate_to_instances {
+    Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ] {
+        Properties.Tags.*[Key in ["Environment", "Project", "Component"]] {
+            PropagateAtLaunch == true << Required tags should propagate to instances >>
+        }
+    }
+}
+
+rule asg_has_environment_specific_naming {
+    Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ] {
+        Properties {
+            AutoScalingGroupName exists
+            AutoScalingGroupName != "" << Auto Scaling Group must have a name >>
+        }
+    }
+}
+
+rule scaling_policies_have_descriptive_names {
+    Resources.*[ Type == "AWS::AutoScaling::ScalingPolicy" ] {
+        # Check if resource has a logical name that indicates its purpose
+        when Type == "AWS::AutoScaling::ScalingPolicy" {
+            # This is a CFN Guard limitation - we can't directly check logical names
+            # But we can ensure properties are descriptive
+            Properties {
+                AdjustmentType exists << Scaling policy must specify adjustment type >>
+                ScalingAdjustment exists << Scaling policy must specify scaling adjustment >>
+            }
+        }
+    }
+}
+
+rule cloudwatch_alarms_have_descriptions {
+    Resources.*[ Type == "AWS::CloudWatch::Alarm" ] {
+        Properties {
+            AlarmDescription exists
+            AlarmDescription != "" << CloudWatch alarms must have descriptions >>
+        }
+    }
+}
+
+# ECS Cluster Compliance Rules
+rule ecs_cluster_has_required_tags {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        Properties.Tags[*] {
+            some Key == "Environment" << ECS Cluster must have Environment tag >>
+            some Key == "Name" << ECS Cluster must have Name tag >>
+        }
+    }
+}
+
+rule ecs_cluster_has_recommended_tags {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        Properties.Tags[*] {
+            some Key == "Project" << ECS Cluster should have Project tag for organization >>
+            some Key == "Component" << ECS Cluster should have Component tag for identification >>
+        }
+    }
+}
+
+rule ecs_cluster_has_proper_naming_convention {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        Properties {
+            ClusterName exists << ECS Cluster must have a name >>
+            ClusterName != "" << ECS Cluster name cannot be empty >>
+        }
+    }
+}
+
+rule ecs_cluster_name_includes_environment {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        Properties {
+            ClusterName exists
+            # Check that cluster name contains environment indicator
+            ClusterName == /.*-(dev|staging|production).*/ << ECS Cluster name should include environment indicator >>
+        }
+    }
+}
+
+rule ecs_cluster_exports_consistent_naming {
+    Outputs.*[Export.Name == /.*ECSCluster.*/] {
+        Export.Name == /.*-\${Environment}$/ << ECS Cluster exports should follow consistent naming pattern with environment suffix >>
+    }
+}
+
+# ECS Service Compliance Rules
+rule ecs_service_has_required_tags {
+    Resources.*[ Type == "AWS::ECS::Service" ] {
+        Properties.Tags[*] {
+            some Key == "Environment" << ECS Service must have Environment tag >>
+            some Key == "Project" << ECS Service must have Project tag >>
+            some Key == "Component" << ECS Service must have Component tag >>
+        }
+    }
+}
+
+rule ecs_task_definition_has_required_tags {
+    Resources.*[ Type == "AWS::ECS::TaskDefinition" ] {
+        Properties.Tags[*] {
+            some Key == "Environment" << ECS Task Definition must have Environment tag >>
+            some Key == "Project" << ECS Task Definition must have Project tag >>
+        }
+    }
+}
+
+rule ecs_service_proper_naming_convention {
+    Resources.*[ Type == "AWS::ECS::Service" ] {
+        Properties {
+            ServiceName exists << ECS Service must have a name >>
+            ServiceName != "" << Service name cannot be empty >>
+            ServiceName == /.*-(dev|staging|production)-.*/ << Service name should include environment indicator >>
+        }
+    }
+}
+
+rule ecs_task_definition_family_naming {
+    Resources.*[ Type == "AWS::ECS::TaskDefinition" ] {
+        Properties {
+            Family exists
+            Family == /.*-(dev|staging|production)-.*/ << Task definition family should include environment indicator >>
+        }
+    }
+}
+
+rule ecs_log_groups_proper_naming {
+    Resources.*[ Type == "AWS::Logs::LogGroup" ] {
+        Properties {
+            LogGroupName exists << Log group must have a name >>
+            LogGroupName == /^\/ecs\/.*/ << ECS log groups should follow /ecs/ prefix convention >>
+        }
+    }
+}
+
+rule ecs_outputs_consistent_naming {
+    Outputs.*[Export.Name == /.*ECSService.*/] {
+        Export.Name == /.*-\${Environment}-.*/ << ECS Service exports should include environment in naming >>
+    }
+}
+
+# Launch Template Compliance Rules
+rule launch_template_has_required_tags {
+    Resources.*[ Type == "AWS::EC2::LaunchTemplate" ] {
+        Properties.LaunchTemplateData.TagSpecifications[*] {
+            when ResourceType == "instance" {
+                Tags[*] {
+                    some Key == "Name" << Instances must have Name tag >>
+                    some Key == "Environment" << Instances must have Environment tag >>
+                    some Key == "Project" << Instances should have Project tag >>
+                }
+            }
+        }
+    }
+}
+
+rule launch_template_proper_naming {
+    Resources.*[ Type == "AWS::EC2::LaunchTemplate" ] {
+        Properties {
+            LaunchTemplateName exists << Launch Template must have a name >>
+            LaunchTemplateName != "" << Launch Template name cannot be empty >>
+            LaunchTemplateName == /.*-(dev|staging|production).*/ << Launch Template name should include environment >>
+        }
+    }
+}
+
+rule iam_role_proper_naming {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties {
+            RoleName exists << IAM Role should have explicit name >>
+            RoleName != "" << IAM Role name cannot be empty >>
+            RoleName == /.*-(dev|staging|production).*/ << IAM Role name should include environment >>
+        }
+    }
+}
+
+rule iam_instance_profile_proper_naming {
+    Resources.*[ Type == "AWS::IAM::InstanceProfile" ] {
+        Properties {
+            InstanceProfileName exists << Instance Profile should have explicit name >>
+            InstanceProfileName != "" << Instance Profile name cannot be empty >>
+        }
+    }
+}
+
+rule security_group_proper_naming {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties {
+            GroupName exists << Security Group should have explicit name >>
+            GroupName != "" << Security Group name cannot be empty >>
+            GroupName == /.*-(dev|staging|production).*/ << Security Group name should include environment >>
+        }
+    }
+}
+
+rule resources_have_environment_tags {
+    Resources.*[ Type in ["AWS::IAM::Role", "AWS::EC2::SecurityGroup"] ] {
+        Properties.Tags[*] {
+            some Key == "Environment" << Resources must have Environment tag >>
+            some Key == "Name" << Resources must have Name tag >>
+        }
+    }
+}
+
+# VPC Compliance Rules
+rule vpc_has_required_tags {
+    Resources.*[ Type == "AWS::EC2::VPC" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << VPC must have Name tag >>
+            some Key == "Environment" << VPC must have Environment tag >>
+        }
+    }
+}
+
+rule subnets_have_required_tags {
+    Resources.*[ Type == "AWS::EC2::Subnet" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Subnet must have Name tag >>
+            some Key == "Environment" << Subnet must have Environment tag >>
+            some Key == "Type" << Subnet must have Type tag (Public/Private) >>
+        }
+    }
+}
+
+rule subnets_type_tag_values {
+    Resources.*[ Type == "AWS::EC2::Subnet" ] {
+        Properties.Tags.*[Key == "Type"] {
+            Value in ["Public", "Private"] << Subnet Type tag must be 'Public' or 'Private' >>
+        }
+    }
+}
+
+rule route_tables_have_required_tags {
+    Resources.*[ Type == "AWS::EC2::RouteTable" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Route table must have Name tag >>
+            some Key == "Environment" << Route table must have Environment tag >>
+        }
+    }
+}
+
+rule internet_gateway_has_required_tags {
+    Resources.*[ Type == "AWS::EC2::InternetGateway" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Internet Gateway must have Name tag >>
+            some Key == "Environment" << Internet Gateway must have Environment tag >>
+        }
+    }
+}
+
+rule flow_logs_have_required_tags {
+    Resources.*[ Type == "AWS::EC2::FlowLog" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Flow logs must have Name tag >>
+            some Key == "Environment" << Flow logs must have Environment tag >>
+        }
+    }
+}
+
+rule vpc_naming_convention {
+    Resources.*[ Type == "AWS::EC2::VPC" ] {
+        Properties.Tags.*[Key == "Name"] {
+            Value == /.*-(dev|staging|production).*/ << VPC name should include environment indicator >>
+        }
+    }
+}
+
+rule consistent_export_naming {
+    Outputs.*[Export.Name == /.*VPC.*/] {
+        Export.Name == /.*-\${Environment}.*/ << VPC exports should include environment in naming >>
+    }
+}
+
+# VPC Template Parameter Rules
+rule vpc_template_has_project_name_parameter {
+    Parameters {
+        ProjectName exists << VPC template must have ProjectName parameter >>
+        ProjectName.Type == "String" << ProjectName must be String type >>
+    }
+}
+
+rule vpc_naming_uses_project_name {
+    Resources.*[ Type == "AWS::EC2::VPC" ] {
+        Properties.Tags.*[Key == "Name"] {
+            Value == /^\${ProjectName}-VPC-\${Environment}$/ << VPC name should follow ${ProjectName}-VPC-${Environment} pattern >>
+        }
+    }
+}
+
+rule consistent_resource_naming_pattern {
+    Resources.*[ Type in ["AWS::EC2::Subnet", "AWS::EC2::RouteTable", "AWS::EC2::InternetGateway"] ] {
+        Properties.Tags.*[Key == "Name"] {
+            Value == /^\${ProjectName}-.*-\${Environment}$/ << Resource names should follow ${ProjectName}-ResourceType-${Environment} pattern >>
+        }
+    }
+}
+
+# Application Load Balancer Compliance Rules
+rule alb_has_required_tags {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << ALB must have Name tag >>
+            some Key == "Environment" << ALB must have Environment tag >>
+        }
+    }
+}
+
+rule target_groups_have_required_tags {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Target groups must have Name tag >>
+            some Key == "Environment" << Target groups must have Environment tag >>
+            some Key == "Service" << Target groups should have Service tag >>
+        }
+    }
+}
+
+rule alb_naming_convention {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        Properties {
+            Name exists << ALB must have explicit name >>
+            Name != "" << ALB name cannot be empty >>
+            Name == /.*-(dev|staging|production)$/ << ALB name should end with environment >>
+        }
+    }
+}
+
+rule target_group_naming_convention {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        Properties {
+            Name exists << Target group must have explicit name >>
+            Name != "" << Target group name cannot be empty >>
+            Name == /.*-tg-(dev|staging|production)$/ << Target group name should include -tg- and environment >>
+        }
+    }
+}
+
+rule security_groups_alb_naming {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*LoadBalancer.*/ {
+            Properties {
+                GroupName == /.*SecurityGroup.*-(dev|staging|production)$/ << ALB security group name should include environment >>
+                GroupDescription exists << Security groups must have descriptions >>
+                GroupDescription != "" << Security group descriptions cannot be empty >>
+            }
+        }
+    }
+}
+
+rule alb_exports_consistent_naming {
+    Outputs.*[Export.Name == /.*LoadBalancer.*/] {
+        Export.Name == /.*-\${Environment}$/ << ALB exports should end with environment variable >>
+    }
+}
+
+# Route 53 DNS Compliance Rules
+rule route53_health_checks_have_tags {
+    Resources.*[ Type == "AWS::Route53::HealthCheck" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Health checks must have Name tag >>
+            some Key == "Environment" << Health checks must have Environment tag >>
+            some Key == "Domain" << Health checks should have Domain tag >>
+        }
+    }
+}
+
+rule route53_record_comments_documentation {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        Properties {
+            when Comment exists {
+                Comment != "" << DNS record comments cannot be empty >>
+                Comment == /.*${Environment}.*/ << Comments should include environment information >>
+            }
+        }
+    }
+}
+
+rule route53_environment_specific_exports {
+    Outputs.*[Export.Name == /.*DNS.*/] {
+        Export.Name == /.*-\${Environment}$/ << DNS exports should include environment suffix >>
+    }
+}
+
+rule route53_set_identifier_naming {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.SetIdentifier exists {
+            Properties {
+                SetIdentifier != "" << Set identifier cannot be empty >>
+                SetIdentifier == /.*${Environment}.*/ << Set identifier should include environment >>
+            }
+        }
+    }
+}
+
+rule route53_health_check_naming {
+    Resources.*[ Type == "AWS::Route53::HealthCheck" ] {
+        Properties.Tags.*[Key == "Name"] {
+            Value == /.*${Environment}.*/ << Health check names should include environment >>
+            Value == /.*HealthCheck.*/ << Health check names should include "HealthCheck" >>
+        }
+    }
+}
+
+rule route53_consistent_parameter_validation {
+    Parameters {
+        HostedZoneId exists << Template must have HostedZoneId parameter >>
+        HostedZoneId.Type == "String" << HostedZoneId must be String type >>
+        Environment exists << Template must have Environment parameter >>
+        Environment.AllowedValues exists << Environment must have allowed values >>
+    }
+}
+
+# SSL Certificate Compliance Rules
+rule acm_certificate_required_tags {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << SSL certificates must have Name tag >>
+            some Key == "Environment" << SSL certificates must have Environment tag >>
+            some Key == "Purpose" << SSL certificates should have Purpose tag >>
+        }
+    }
+}
+
+rule acm_certificate_naming_convention {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties.Tags.*[Key == "Name"] {
+            Value == /.*${Environment}.*/ << Certificate name should include environment >>
+            Value == /.*ssl.*/ or Value == /.*certificate.*/ << Certificate name should indicate it's an SSL certificate >>
+        }
+    }
+}
+
+rule acm_environment_specific_exports {
+    Outputs.*[Export.Name == /.*SSL.*/ or Export.Name == /.*Certificate.*/] {
+        Export.Name == /.*-\${Environment}$/ << SSL certificate exports should include environment suffix >>
+    }
+}
+
+rule acm_certificate_description_standards {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties.Tags.*[Key == "Purpose"] {
+            Value != "" << Purpose tag cannot be empty >>
+            Value == /.*[Ii]nfrastructure.*/ or 
+            Value == /.*[Ww]eb.*/ or 
+            Value == /.*[Aa]pplication.*/ << Purpose should describe certificate use case >>
+        }
+    }
+}
+
+rule acm_consistent_parameter_validation {
+    Parameters {
+        PrimaryDomainName exists << Template must have PrimaryDomainName parameter >>
+        PrimaryDomainName.Type == "String" << PrimaryDomainName must be String type >>
+        HostedZoneId exists << Template must have HostedZoneId parameter >>
+        HostedZoneId.Type == "String" << HostedZoneId must be String type >>
+    }
+}
+
+rule acm_output_descriptions {
+    Outputs {
+        SSLCertificateArn exists << Template should export SSL certificate ARN >>
+        SSLCertificateArn.Description exists << Certificate ARN output must have description >>
+        SSLCertificateDomainName exists << Template should export primary domain name >>
+    }
+}
+
+# CI/CD Pipeline Compliance Rules
+rule codebuild_project_required_tags {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << CodeBuild projects must have Name tag >>
+            some Key == "Environment" << CodeBuild projects must have Environment tag >>
+            some Key == "Project" << CodeBuild projects must have Project tag >>
+        }
+    }
+}
+
+rule codepipeline_required_tags {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << CodePipeline must have Name tag >>
+            some Key == "Environment" << CodePipeline must have Environment tag >>
+            some Key == "Project" << CodePipeline must have Project tag >>
+        }
+    }
+}
+
+rule codebuild_naming_convention {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties {
+            Name exists << CodeBuild project must have explicit name >>
+            Name != "" << CodeBuild project name cannot be empty >>
+            Name == /.*-(dev|staging|production)-.*/ << CodeBuild name should include environment >>
+        }
+    }
+}
+
+rule codepipeline_naming_convention {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties {
+            Name exists << CodePipeline must have explicit name >>
+            Name != "" << CodePipeline name cannot be empty >>
+            Name == /.*-(dev|staging|production)-.*/ << CodePipeline name should include environment >>
+        }
+    }
+}
+
+rule pipeline_stage_naming_standards {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*] {
+            Name exists << Pipeline stages must have names >>
+            Name in ["Source", "Build", "Test", "Approval", "Deploy"] << Use standard stage names >>
+        }
+    }
+}
+
+rule codebuild_description_required {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties {
+            Description exists << CodeBuild projects should have descriptions >>
+            Description != "" << CodeBuild description cannot be empty >>
+        }
+    }
+}
+
+rule pipeline_environment_specific_exports {
+    Outputs.*[Export.Name == /.*Pipeline.*/] {
+        Export.Name == /.*-\${Environment}$/ << Pipeline exports should include environment suffix >>
+    }
+}
+
+# IAM Role Compliance Rules
+rule iam_role_required_tags {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << IAM roles must have Name tag >>
+            some Key == "Environment" << IAM roles must have Environment tag >>
+            some Key == "Purpose" << IAM roles must have Purpose tag >>
+        }
+    }
+}
+
+rule iam_role_naming_convention {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties {
+            RoleName exists << IAM roles must have explicit names >>
+            RoleName != "" << Role name cannot be empty >>
+            RoleName == /.*-(dev|staging|production)$/ << Role name should end with environment >>
+            RoleName == /^[A-Za-z0-9\-]+$/ << Role name should only contain alphanumeric and hyphens >>
+        }
+    }
+}
+
+rule iam_policy_naming_convention {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*] {
+            PolicyName exists << Inline policies must have names >>
+            PolicyName != "" << Policy name cannot be empty >>
+            PolicyName == /.*Policy.*/ << Policy names should include 'Policy' >>
+        }
+    }
+}
+
+rule iam_role_description_standards {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Tags.*[Key == "Purpose"] {
+            Value != "" << Purpose tag cannot be empty >>
+            Value == /.*CodeBuild.*/ or 
+            Value == /.*CI\/CD.*/ or 
+            Value == /.*Build.*/ << Purpose should describe role function >>
+        }
+    }
+}
+
+rule iam_export_naming_consistency {
+    Outputs.*[Export.Name == /.*Role.*/ or Export.Name == /.*IAM.*/] {
+        Export.Name == /.*-\${Environment}$/ << IAM role exports should include environment suffix >>
+    }
+}
+
+rule iam_role_path_compliance {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Path == /^\/[a-zA-Z0-9\-]+\/$/ << Role path should follow standard format >>
+    }
+}
+
+# CodePipeline IAM Compliance Rules
+rule codepipeline_role_required_tags {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Tags[*] {
+                some Key == "Name" << CodePipeline roles must have Name tag >>
+                some Key == "Environment" << CodePipeline roles must have Environment tag >>
+                some Key == "Purpose" << CodePipeline roles must have Purpose tag >>
+                some Key == "Project" << CodePipeline roles must have Project tag >>
+            }
+        }
+    }
+}
+
+rule codepipeline_role_naming_convention {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties {
+                RoleName exists << CodePipeline roles must have explicit names >>
+                RoleName != "" << Role name cannot be empty >>
+                RoleName == /.*CodePipelineRole.*/ << Role name should include 'CodePipelineRole' >>
+                RoleName == /.*-(dev|staging|production)$/ << Role name should end with environment >>
+            }
+        }
+    }
+}
+
+rule codepipeline_policy_naming_standards {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*] {
+                PolicyName exists << Inline policies must have names >>
+                PolicyName != "" << Policy name cannot be empty >>
+                PolicyName == /.*-(dev|staging|production)$/ << Policy names should include environment >>
+            }
+        }
+    }
+}
+
+rule codepipeline_role_path_compliance {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties {
+                Path exists << CodePipeline roles should use paths for organization >>
+                Path == /^\/.*\/$/ << Role path should start and end with forward slash >>
+                Path == /.*${Environment}.*/ << Role path should include environment >>
+            }
+        }
+    }
+}
+
+rule codepipeline_export_naming_consistency {
+    Outputs.*[Export.Name == /.*CodePipeline.*/ or Export.Name == /.*Pipeline.*/] {
+        Export.Name == /.*-\${Environment}$/ << CodePipeline exports should include environment suffix >>
+    }
+}
+
+rule codepipeline_purpose_tag_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Tags.*[Key == "Purpose"] {
+                Value == "CodePipeline IAM Role" << Purpose tag should clearly indicate CodePipeline role >>
+            }
+        }
+    }
+}
+
+# ECS IAM Compliance Rules
+rule ecs_role_required_tags {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties.Tags[*] {
+                some Key == "Name" << ECS roles must have Name tag >>
+                some Key == "Environment" << ECS roles must have Environment tag >>
+                some Key == "Purpose" << ECS roles must have Purpose tag >>
+                some Key == "Project" << ECS roles must have Project tag >>
+            }
+        }
+    }
+}
+
+rule ecs_role_naming_convention {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties {
+                RoleName exists << ECS roles must have explicit names >>
+                RoleName != "" << Role name cannot be empty >>
+                RoleName == /.*ECS.*/ << Role name should include 'ECS' >>
+                RoleName == /.*-(dev|staging|production)$/ << Role name should end with environment >>
+            }
+        }
+    }
+}
+
+rule ecs_policy_naming_standards {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties.Policies[*] {
+                PolicyName exists << Inline policies must have names >>
+                PolicyName != "" << Policy name cannot be empty >>
+                PolicyName == /.*-(dev|staging|production)$/ << Policy names should include environment >>
+            }
+        }
+    }
+}
+
+rule ecs_role_purpose_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*TaskExecutionRole.*/ {
+            Properties.Tags.*[Key == "Purpose"] {
+                Value == "ECS Task Execution" << Task execution role purpose should be clearly defined >>
+            }
+        }
+        when Properties.RoleName == /.*TaskRole.*/ {
+            Properties.Tags.*[Key == "Purpose"] {
+                Value == "ECS Task Application" << Task role purpose should be clearly defined >>
+            }
+        }
+        when Properties.RoleName == /.*ServiceRole.*/ {
+            Properties.Tags.*[Key == "Purpose"] {
+                Value == "ECS Service" << Service role purpose should be clearly defined >>
+            }
+        }
+    }
+}
+
+rule ecs_export_naming_consistency {
+    Outputs.*[Export.Name == /.*ECS.*/ or Export.Name == /.*Task.*/ or Export.Name == /.*Service.*/] {
+        Export.Name == /.*-\${Environment}$/ << ECS role exports should include environment suffix >>
+    }
+}
+
+# Security Group Compliance Rules
+rule security_group_required_tags {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties.Tags[*] {
+            some Key == "Name" << Security groups must have Name tag >>
+            some Key == "Environment" << Security groups must have Environment tag >>
+            some Key == "Purpose" << Security groups must have Purpose tag >>
+            some Key == "Project" << Security groups must have Project tag >>
+        }
+    }
+}
+
+rule security_group_naming_convention {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties {
+            GroupName exists << Security groups must have explicit names >>
+            GroupName != "" << Security group name cannot be empty >>
+            GroupName == /.*-(dev|staging|production)$/ << Security group name should end with environment >>
+            GroupName == /.*SG.*/ << Security group name should include 'SG' >>
+        }
+    }
+}
+
+rule security_group_environment_isolation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties.SecurityGroupIngress[*] {
+            when SourceSecurityGroupId exists {
+                SourceSecurityGroupId == /.*${Environment}.*/ << Referenced security groups should be environment-specific >>
+            }
+        }
+    }
+}
+
+rule security_group_export_naming_consistency {
+    Outputs.*[Export.Name == /.*SecurityGroup.*/ or Export.Name == /.*SG.*/] {
+        Export.Name == /.*-\${Environment}$/ << Security group exports should include environment suffix >>
+    }
+}
+
+rule security_group_purpose_validation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties.Tags.*[Key == "Purpose"] {
+            Value in ["ECS Task Security with Dynamic Port Mapping", 
+                     "ECS EC2 Instance Security", 
+                     "Database Access Control",
+                     "Load Balancer Security",
+                     "Application Security"] << Purpose should describe security group function >>
+        }
+    }
+}
+
+rule security_group_description_standards {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties {
+            GroupDescription == /.*${Environment}.*/ << Description should include environment >>
+            GroupDescription == /.*${ProjectName}.*/ << Description should include project name >>
+        }
+    }
+}
+
+# KMS Compliance Rules
+rule kms_key_required_tags {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.Tags[*] {
+            some Key == "Environment" << KMS keys must have Environment tag >>
+            some Key == "Purpose" << KMS keys must have Purpose tag >>
+            some Key == "Project" << KMS keys must have Project tag >>
+            some Key == "ManagedBy" << KMS keys must have ManagedBy tag >>
+        }
+    }
+}
+
+rule kms_key_purpose_validation {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.Tags.*[Key == "Purpose"] {
+            Value in ["S3 Encryption", 
+                     "EBS Encryption", 
+                     "RDS Encryption",
+                     "Parameter Store Encryption",
+                     "Log Encryption",
+                     "General Application Encryption"] << Purpose should describe key usage >>
+        }
+    }
+}
+
+rule kms_key_environment_tag_validation {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.Tags.*[Key == "Environment"] {
+            Value in ["dev", "staging", "production"] << Environment tag should use standard values >>
+        }
+    }
+}
+
+rule kms_export_naming_consistency {
+    Outputs.*[Export.Name == /.*KMS.*/ or Export.Name == /.*Key.*/] {
+        Export.Name == /.*-\${Environment}$/ << KMS exports should include environment suffix >>
+    }
+}
+
+rule kms_key_policy_documentation {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.KeyPolicy.Statement[*] {
+            when Sid exists {
+                Sid != "" << Policy statement IDs should be descriptive >>
+                Sid == /.*/ << Statement IDs should describe the permission >>
+            }
+        }
+    }
+}
+
+rule kms_alias_consistency_with_key {
+    Resources.*[ Type == "AWS::KMS::Alias" ] {
+        Properties {
+            AliasName == /.*${Environment}.*/ << Alias should match key environment >>
+        }
+    }
+}

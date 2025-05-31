@@ -37,3 +37,6 @@ node_modules/
 
 config/
 parameters/
+
+*.devprompts/
+prompt.md

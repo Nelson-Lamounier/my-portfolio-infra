@@ -5,6 +5,11 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: VPC with public subnets and internet access
 
 Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+  
   Environment:
     Type: String
     Description: Environment name for resource naming and isolation
@@ -24,29 +29,41 @@ Parameters:
     Default: "true"
     AllowedValues: ["true", "false"]
 
+  # Add parameter for NAT Gateway
+  EnableNATGateway:
+    Type: String
+    Description: Enable NAT Gateway for private subnet internet access
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
 Conditions:
   EnableFlowLogs: !Equals [!Ref EnableVpcFlowLogs, "true"]
   IsProduction: !Equals [!Ref Environment, "production"]
+  EnableNAT: !Equals [!Ref EnableNATGateway, "true"]
 
 Resources:
+  # Enhanced VPC with better security defaults
   VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: !Ref VpcCidr
       EnableDnsSupport: true
       EnableDnsHostnames: true
+      InstanceTenancy: default
       Tags:
         - Key: Name
-          Value: !Sub "Portfolio-VPC-${Environment}"
+          Value: !Sub "${ProjectName}-VPC-${Environment}"  # Fixed!
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
 
   # VPC Flow Logs (conditional - enabled in production, optional in dev)
   FlowLogRole:
     Type: AWS::IAM::Role
     Condition: EnableFlowLogs
     Properties:
-      RoleName: !Sub "VPC-FlowLogRole-${Environment}"
+      RoleName: !Sub "${ProjectName}-VPC-FlowLogRole-${Environment}"  # Fixed!
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -54,7 +71,6 @@ Resources:
             Principal:
               Service: vpc-flow-logs.amazonaws.com
             Action: sts:AssumeRole
-      Path: /
       Policies:
         - PolicyName: !Sub "FlowLogsToCloudWatch-${Environment}"
           PolicyDocument:
@@ -72,9 +88,7 @@ Resources:
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/vpc/flowlogs-${Environment}:*"
       Tags:
         - Key: Name
-          Value: !Sub "VPC-FlowLogRole-${Environment}"
-        - Key: Environment
-          Value: !Ref Environment
+          Value: !Sub "${ProjectName}-VPC-FlowLogRole-${Environment}"  # Fixed!
 
   FlowLogGroup:
     Type: AWS::Logs::LogGroup
@@ -108,9 +122,7 @@ Resources:
     Properties:
       Tags:
         - Key: Name
-          Value: !Sub "Portfolio-IGW-${Environment}"
-        - Key: Environment
-          Value: !Ref Environment
+          Value: !Sub "${ProjectName}-IGW-${Environment}"  # Fixed!
 
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -128,7 +140,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub "Portfolio-PublicSubnet1-${Environment}"
+          Value: !Sub "${ProjectName}-PublicSubnet1-${Environment}"  # Fixed!
         - Key: Type
           Value: Public
         - Key: Environment
@@ -143,7 +155,7 @@ Resources:
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: !Sub "Portfolio-PublicSubnet2-${Environment}"
+          Value: !Sub "${ProjectName}-PublicSubnet2-${Environment}"  # Fixed!
         - Key: Type
           Value: Public
         - Key: Environment
@@ -156,6 +168,7 @@ Resources:
       VpcId: !Ref VPC
       CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 4, 8]]  # Third /24 subnet
       AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false  # Explicitly set to false
       Tags:
         - Key: Name
           Value: !Sub "Portfolio-PrivateSubnet1-${Environment}"
@@ -163,6 +176,8 @@ Resources:
           Value: Private
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: "Portfolio"
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
@@ -177,6 +192,8 @@ Resources:
           Value: Private
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: "Portfolio"
 
   # Route Tables
   PublicRouteTable:
@@ -207,6 +224,40 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
+
+  # Optional NAT Gateway for private subnet internet access
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: EnableNAT
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-NAT-EIP-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: EnableNAT
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-NAT-Gateway-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Private route for NAT Gateway
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Condition: EnableNAT
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
 
   # Route Table Associations
   PublicSubnet1RouteTableAssociation:

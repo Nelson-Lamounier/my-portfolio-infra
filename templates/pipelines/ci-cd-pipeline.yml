@@ -2,280 +2,353 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: |
-  Dynamic CI/CD Pipeline Template for Container Applications
+  Ultra-Dynamic CI/CD Pipeline Template for Multi-Environment Container Applications
 
-  This reusable template creates a complete CI/CD pipeline that can be configured
-  for different projects without code duplication. It orchestrates the entire
-  deployment workflow from source code to running containers in ECS.
-
-  Pipeline Flow:
-  1. Source: Pulls code from GitHub using secure CodeStar connections
-  2. Build: Compiles code, builds Docker images, pushes to ECR
-  3. Deploy: Updates ECS service with new container image
-
-  Key Features:
-  - Modular IAM policies through nested stacks
-  - Flexible BuildSpec configuration (default or custom)
-  - Project-specific resource naming to prevent conflicts
-  - Secure credential management through SSM and CodeStar connections
+  This template creates environment-specific CI/CD pipelines with dynamic project
+  configuration, automated testing, and deployment approval workflows.
 
 Parameters:
-  ArtifactBucket:
-    Description: |
-      S3 bucket name for storing pipeline artifacts.
-      This bucket serves as temporary storage for source code, build outputs,
-      and deployment artifacts as they move between pipeline stages.
-      Should be pre-created and accessible by the pipeline role.
+  # Environment Parameter
+  Environment:
     Type: String
-    Default: infra/
+    Description: Environment name for resource naming and deployment targeting
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
 
-    # Optional secondary service for full-stack applications
-  SecondaryServiceName:
-    Description: Name of the secondary ECS service (for full-stack apps)
-    Type: String
-    Default: ""
-
-  ServiceName:
-    Description: |
-      Name of the target ECS service for deployments.
-      This service must exist in the ECS cluster and should match the
-      container name specified in the task definition.
-      Example: 'portfolio-service', 'api-service'
-    Type: String
-
+  # Project Configuration
   ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  # Project Configuration as JSON Array
+  ProjectsConfig:
     Description: |
-      Unique identifier for this project's resources.
-      Used to create unique names for CodeBuild projects, pipelines,
-      and IAM roles to prevent conflicts when deploying multiple pipelines.
-      Convention: PascalCase (e.g., 'Portfolio', 'EcommerceAPI', 'BlogApp')
+      JSON array of project configurations for CI/CD pipelines
+    Type: String
+    Default: |
+      [
+        {
+          "name": "Portfolio",
+          "repositoryId": "Nelson-Lamounier/portfolio-frontend",
+          "containerName": "portfolio-container",
+          "serviceName": "portfolio-service",
+          "ecrRepository": "portfolio",
+          "projectType": "single-container",
+          "enabled": true,
+          "healthCheckPath": "/",
+          "branches": {
+            "dev": "develop",
+            "staging": "staging",
+            "production": "main"
+          }
+        },
+        {
+          "name": "Project1",
+          "repositoryId": "Nelson-Lamounier/magic-rainbow-demo",
+          "containerName": "project1-container",
+          "serviceName": "project1-service",
+          "ecrRepository": "project1",
+          "projectType": "single-container",
+          "enabled": true,
+          "healthCheckPath": "/healthcheck",
+          "branches": {
+            "dev": "develop",
+            "staging": "staging",
+            "production": "main"
+          }
+        }
+      ]
+
+  # Infrastructure Configuration
+  ArtifactBucket:
+    Description: S3 bucket name for storing pipeline artifacts
     Type: String
 
-  RepositoryId:
-    Description: |
-      GitHub repository identifier in 'owner/repository' format.
-      This repository contains the source code and Dockerfile for the application.
-      Examples: 'myorg/frontend-app', 'username/personal-portfolio'
-      Repository must be accessible via the provided CodeStar connection.
+  TemplateBucket:
+    Description: S3 bucket containing CloudFormation templates
     Type: String
 
   ConnectionArn:
-    Description: |
-      ARN of the CodeStar connection for GitHub integration.
-      This connection must be pre-established and approved in both AWS and GitHub.
-      Provides secure, token-based authentication without storing credentials.
-      Format: arn:aws:codeconnections:region:account:connection/connection-id
+    Description: ARN of the CodeStar connection for GitHub integration
     Type: String
 
-  ContainerName:
-    Description: |
-      Container name as defined in the ECS task definition.
-      This name is used in imagedefinitions.json to specify which container
-      image to update during deployment. Must match exactly with the task definition.
-      If unsure, check your ECS task definition in the AWS Console.
+  # Build Configuration
+  CodeBuildImage:
+    Description: Docker image for CodeBuild environment
     Type: String
+    Default: "aws/codebuild/standard:7.0"
 
-  # Optional secondary container for full-stack applications
-  SecondaryContainerName:
-    Description: Secondary container name (for full-stack apps)
+  # Approval Configuration
+  EnableApprovals:
+    Description: Enable manual approval for deployments
     Type: String
-    Default: ""
+    AllowedValues: ["true", "false"]
+    Default: "false"
 
-  ECRRepositoryName:
-    Description: |
-      Name of the ECR repository for storing Docker images.
-      Repository must exist before pipeline execution and should follow
-      naming conventions (lowercase, hyphen-separated).
-      Examples: 'portfolio-app', 'ecommerce-frontend', 'api-backend'
+  ApprovalTimeoutInMinutes:
+    Description: Timeout for manual approvals (in minutes)
+    Type: Number
+    Default: 60
+    MinValue: 5
+    MaxValue: 1440
 
-    # Optional secondary ECR repository for full-stack applications
+  # Enhanced build configuration with security
+  CodeBuildComputeType:
+    Description: Compute type for CodeBuild projects
     Type: String
+    Default: "BUILD_GENERAL1_SMALL"
+    AllowedValues: ["BUILD_GENERAL1_SMALL", "BUILD_GENERAL1_MEDIUM", "BUILD_GENERAL1_LARGE"]
 
-  SecondaryECRRepositoryName:
-    Description: Name of the secondary ECR repository (for full-stack apps)
-    Type: String
-    Default: ""
+Mappings:
+  # Environment-specific build configurations
+  BuildConfigMap:
+    dev:
+      ComputeType: BUILD_GENERAL1_SMALL
+      TimeoutMinutes: 30
+      QueuedTimeoutMinutes: 15
+      ConcurrentBuilds: 3
+      AutoTrigger: true
+      TestingEnabled: false
+    staging:
+      ComputeType: BUILD_GENERAL1_MEDIUM
+      TimeoutMinutes: 45
+      QueuedTimeoutMinutes: 20
+      ConcurrentBuilds: 2
+      AutoTrigger: false
+      TestingEnabled: true
+    production:
+      ComputeType: BUILD_GENERAL1_LARGE
+      TimeoutMinutes: 60
+      QueuedTimeoutMinutes: 30
+      ConcurrentBuilds: 1
+      AutoTrigger: false
+      TestingEnabled: true
 
-  TemplateBucket:
-    Description: |
-      S3 bucket containing CloudFormation templates.
-      Used by nested stacks to reference IAM policy templates.
-    Type: String
-
-  # Project type to determine build strategy
-  ProjectType:
-    Description: Type of project (single-container or full-stack)
-    Type: String
-    AllowedValues:
-      - single-container
-      - full-stack
-    Default: single-container
+  # Environment-specific pipeline configurations
+  PipelineConfigMap:
+    dev:
+      ApprovalRequired: false
+      DeploymentStrategy: "rolling"
+      MonitoringLevel: "basic"
+      RollbackEnabled: false
+    staging:
+      ApprovalRequired: true
+      DeploymentStrategy: "blue-green"
+      MonitoringLevel: "enhanced"
+      RollbackEnabled: true
+    production:
+      ApprovalRequired: true
+      DeploymentStrategy: "blue-green"
+      MonitoringLevel: "full"
+      RollbackEnabled: true
 
 Conditions:
-  IsFullStack: !Equals
-    - !Ref ProjectType
-    - full-stack
+  # Environment-specific conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsStaging: !Equals [!Ref Environment, "staging"]
+  IsDevelopment: !Equals [!Ref Environment, "dev"]
+  
+  # Feature conditions
+  RequiresApproval: !Or
+    - !And
+      - !Equals [!Ref EnableApprovals, "true"]
+      - !Or [!Condition IsProduction, !Condition IsStaging]
+    - !FindInMap [PipelineConfigMap, !Ref Environment, ApprovalRequired]
+  
+  EnableTesting: !FindInMap [BuildConfigMap, !Ref Environment, TestingEnabled]
+  AutoTriggerEnabled: !FindInMap [BuildConfigMap, !Ref Environment, AutoTrigger]
 
-  HasSecondaryService: !Not
-    - !Equals
-      - !Ref SecondaryServiceName
-      - ""
+Transform: AWS::LanguageExtensions
 
 Resources:
+  # Enhanced CodeBuild Projects with better security
+  Fn::ForEach::CodeBuildProjects:
+    - ProjectItem
+    - !Ref ProjectsConfig
+    - "${ProjectItem.name}CodeBuildProject":
+        Type: AWS::CodeBuild::Project
+        Properties:
+          Name: !Sub "${ProjectName}-${ProjectItem.name}-${Environment}-CodeBuild"
+          Description: !Sub "CodeBuild project for ${ProjectItem.name} in ${Environment}"
+          Source:
+            Type: CODEPIPELINE
+            BuildSpec: !If
+              - IsProduction
+              - !Sub "buildspec-${Environment}.yml"
+              - "buildspec.yml"
+          Artifacts:
+            Type: CODEPIPELINE
+          Environment:
+            # Environment-specific compute sizing
+            ComputeType: !FindInMap [BuildConfigMap, !Ref Environment, ComputeType]
+            Image: !Ref CodeBuildImage
+            Type: LINUX_CONTAINER
+            PrivilegedMode: true  # Only for Docker builds
+            EnvironmentVariables:
+              - Name: AWS_REGION
+                Value: !Ref AWS::Region
+              - Name: AWS_ACCOUNT_ID
+                Value: !Ref AWS::AccountId
+              - Name: ENVIRONMENT
+                Value: !Ref Environment
+              - Name: PROJECT_NAME
+                Value: !Ref ProjectName
+              - Name: ECR_REPOSITORY_NAME
+                Value: !Sub "${ProjectItem.ecrRepository}-${Environment}"
+              - Name: CONTAINER_NAME
+                Value: !Ref "${ProjectItem.containerName}"
+              - Name: PROJECT_TYPE
+                Value: !Ref "${ProjectItem.projectType}"
+              - Name: HEALTH_CHECK_PATH
+                Value: !Ref "${ProjectItem.healthCheckPath}"
+          ServiceRole: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-CodeBuildRole-${Environment}"
+          TimeoutInMinutes: !FindInMap [BuildConfigMap, !Ref Environment, TimeoutMinutes]
+          QueuedTimeoutInMinutes: !FindInMap [BuildConfigMap, !Ref Environment, QueuedTimeoutMinutes]
+          ConcurrentBuildLimit: !FindInMap [BuildConfigMap, !Ref Environment, ConcurrentBuilds]
+          Tags:
+            - Key: Name
+              Value: !Sub "${ProjectName}-${ProjectItem.name}-${Environment}-CodeBuild"
+            - Key: Environment
+              Value: !Ref Environment
+            - Key: Project
+              Value: !Ref "${ProjectItem.name}"
 
-  # # Nested Stack: CodeBuild IAM Policies
-  # # Separates IAM concerns for better maintainability and reusability
+  # Dynamic CodePipelines
+  Fn::ForEach::CodePipelines:
+    - ProjectItem
+    - !Ref ProjectsConfig
+    - "${ProjectItem.name}Pipeline":
+        Type: AWS::CodePipeline::Pipeline
+        Properties:
+          Name: !Sub "${ProjectName}-${ProjectItem.name}-${Environment}-Pipeline"
+          RoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-CodePipelineRole-${Environment}"
+          ArtifactStore:
+            Type: S3
+            Location: !Sub "${ArtifactBucket}-${Environment}"
+            EncryptionKey:
+              Type: KMS
+              Id: !ImportValue
+                Fn::Sub: "${ProjectName}-KMSKeyId-${Environment}"
+          Stages:
+            # Source Stage with secure connection
+            - Name: Source
+              Actions:
+                - Name: SourceAction
+                  ActionTypeId:
+                    Category: Source
+                    Owner: AWS
+                    Provider: CodeStarSourceConnection
+                    Version: 1
+                  Configuration:
+                    ConnectionArn: !Ref ConnectionArn
+                    FullRepositoryId: !Ref "${ProjectItem.repositoryId}"
+                    BranchName: !Sub "${ProjectItem.branches.${Environment}}"
+                    OutputArtifactFormat: CODE_ZIP
+                    DetectChanges: !FindInMap [BuildConfigMap, !Ref Environment, AutoTrigger]
+                  OutputArtifacts:
+                    - Name: SourceOutput
 
-  # CodeBuild Project: Handles Docker image compilation and ECR publishing
-  CodeBuildProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${ProjectName}-CodeBuild
-      Source:
-        Type: CODEPIPELINE
-
-        # Always use buildspec.yml from the repository
-        # Remove BuildSpec property to use default buildspec.yml location
-      Artifacts:
-        Type: CODEPIPELINE
-      Environment:
-        ComputeType: BUILD_GENERAL1_MEDIUM
-        Image: aws/codebuild/standard:7.0
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: AWS_REGION
-            Value: !Ref AWS::Region
-          - Name: AWS_ACCOUNT_ID
-            Value: !Ref AWS::AccountId
-
-          # Pass ECR repository name to buildspec
-          - Name: ECR_REPOSITORY_NAME
-            Value: !Ref ECRRepositoryName
-
-          # Pass container name to buildspec
-          - Name: CONTAINER_NAME
-            Value: !Ref ContainerName
-
-          # Conditional environment variables for full-stack
-          - Name: SECONDARY_ECR_REPOSITORY_NAME
-            Value: !If
-              - HasSecondaryContainer
-              - !Ref SecondaryECRRepositoryName
-              - ""
-          - Name: SECONDARY_CONTAINER_NAME
-            Value: !If
-              - HasSecondaryContainer
-              - !Ref SecondaryContainerName
-              - ""
-      ServiceRole: !ImportValue Portfolio-CodeBuildRoleArn
-
-  # CodePipeline: Orchestrates the complete CI/CD workflow
-  Pipeline:
-    Type: AWS::CodePipeline::Pipeline
-    Properties:
-
-      # Project-specific naming for easy identification in console
-      Name: !Sub ${ProjectName}-Pipeline
-
-      # Use IAM role from nested stack for pipeline orchestration
-      RoleArn: !ImportValue Portfolio-CodePipelineRoleArn
-
-      # Artifact storage configuration
-      ArtifactStore:
-        Type: S3
-        Location: !Ref ArtifactBucket
-      Stages:
-
-        # Stage 1: Source Code Retrieval
-        - Name: Source
-          Actions:
-            - Name: SourceAction
-              ActionTypeId:
-                Category: Source
-                Owner: AWS
-                Provider: CodeStarSourceConnection # Secure GitHub integration
-                Version: 1
-              Configuration:
-                ConnectionArn: !Ref ConnectionArn # Pre-established GitHub connection
-                FullRepositoryId: !Ref RepositoryId # Target repository
-                BranchName: main # Primary branch for deployments
-                OutputArtifactFormat: CODE_ZIP # Compressed source for efficiency
-              OutputArtifacts:
-
-                # Source code package for build stage
-                - Name: SourceOutput
-
-        # Stage 2: Build and Image Creation
-        - Name: Build
-          Actions:
+            # Build Stage
             - Name: Build
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild # Managed build service
-                Version: 1
-              InputArtifacts:
+              Actions:
+                - Name: Build
+                  ActionTypeId:
+                    Category: Build
+                    Owner: AWS
+                    Provider: CodeBuild
+                    Version: 1
+                  InputArtifacts:
+                    - Name: SourceOutput
+                  OutputArtifacts:
+                    - Name: BuildOutput
+                  Configuration:
+                    ProjectName: !Sub "${ProjectName}-${ProjectItem.name}-${Environment}-CodeBuild"
 
-                # Source code from previous stage
-                - Name: SourceOutput
-              OutputArtifacts:
+            # Conditional Testing Stage
+            - !If
+              - EnableTesting
+              - Name: Test
+                Actions:
+                  - Name: UnitTests
+                    ActionTypeId:
+                      Category: Test
+                      Owner: AWS
+                      Provider: CodeBuild
+                      Version: 1
+                    InputArtifacts:
+                      - Name: SourceOutput
+                    Configuration:
+                      ProjectName: !Sub "${ProjectName}-${ProjectItem.name}-${Environment}-Tests"
+              - !Ref AWS::NoValue
 
-                # Build artifacts including imagedefinitions.json
-                - Name: BuildOutput
-              Configuration:
+            # Conditional Approval Stage
+            - !If
+              - RequiresApproval
+              - Name: Approval
+                Actions:
+                  - Name: ManualApproval
+                    ActionTypeId:
+                      Category: Approval
+                      Owner: AWS
+                      Provider: Manual
+                      Version: 1
+                    Configuration:
+                      NotificationArn: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${ProjectName}-ApprovalTopic-${Environment}"
+                      CustomData: !Sub |
+                        Please review and approve deployment of ${ProjectItem.name} to ${Environment}
+                        
+                        Project: ${ProjectItem.name}
+                        Environment: ${Environment}
+                        Repository: ${ProjectItem.repositoryId}
+                        
+                        Review the build artifacts and approve if ready for deployment.
+                      ExternalEntityLink: !Sub "https://console.aws.amazon.com/codesuite/codebuild/projects/${ProjectName}-${ProjectItem.name}-${Environment}-CodeBuild/history"
+                    TimeoutInMinutes: !Ref ApprovalTimeoutInMinutes
+              - !Ref AWS::NoValue
 
-                # Reference to CodeBuild project created above
-                ProjectName: !Ref CodeBuildProject
+            # Deploy Stage
+            - Name: Deploy
+              Actions:
+                - Name: DeployECS
+                  ActionTypeId:
+                    Category: Deploy
+                    Owner: AWS
+                    Provider: ECS
+                    Version: 1
+                  InputArtifacts:
+                    - Name: BuildOutput
+                  Configuration:
+                    ClusterName: !Sub "${ProjectName}-ECSCluster-${Environment}"
+                    ServiceName: !Sub "${Environment}-${ProjectItem.name}-${ProjectItem.serviceName}"
+                    FileName: imagedefinitions.json
 
-        # Stage 3: ECS Deployment
-        - Name: Deploy
-          Actions: !If
-            - - Name: DeployECS
-                ActionTypeId:
-                  Category: Deploy
-                  Owner: AWS
-                  Provider: ECS # Native ECS deployment action
-                  Version: 1
-                InputArtifacts:
-
-                  # Build artifacts containing deployment manifest
-                  - Name: BuildOutput
-                Configuration:
-
-                  # Target ECS cluster (imported from infrastructure stack)
-                  ClusterName: !ImportValue ECSClusterName
-
-                  # Target ECS service for container updates
-                  ServiceName: !Ref ServiceName
-
-                  # Deployment manifest specifying container image updates
-                  FileName: imagedefinitions.json
-
-            # Single-container fallback
-            - - Name: DeployECS
-                ActionTypeId:
-                  Category: Deploy
-                  Owner: AWS
-                  Provider: ECS
-                  Version: 1
-                InputArtifacts:
-                  - Name: BuildOutput
-                Configuration:
-                  ClusterName: !ImportValue ECSClusterName
-                  ServiceName: !Ref ServiceName
-                  FileName: imagedefinitions.json
+          Tags:
+            - Key: Name
+              Value: !Sub "${ProjectName}-${ProjectItem.name}-${Environment}-Pipeline"
+            - Key: Environment
+              Value: !Ref Environment
+            - Key: Project
+              Value: !Ref "${ProjectItem.name}"
 
 Outputs:
-  PipelineName:
-    Description: |
-      Name of the created CodePipeline.
-
-      Use this output to reference the pipeline in monitoring, notifications,
-      or other automation workflows. The pipeline name follows the pattern
-      '{ProjectName}-Pipeline' for consistent identification.
-    Value: !Ref Pipeline
+  # Environment Pipeline Summary
+  EnvironmentPipelineInfo:
+    Description: Environment-specific pipeline configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Project: ${ProjectName}
+      Compute Type: ${BuildConfigMap.${Environment}.ComputeType}
+      Testing Enabled: ${BuildConfigMap.${Environment}.TestingEnabled}
+      Approvals Required: ${PipelineConfigMap.${Environment}.ApprovalRequired}
+      Auto Trigger: ${BuildConfigMap.${Environment}.AutoTrigger}
+      Artifact Bucket: ${ArtifactBucket}-${Environment}
     Export:
+      Name: !Sub "${ProjectName}-PipelineEnvironmentInfo-${Environment}"
 
-      # Export for potential use by monitoring or notification stacks
-      Name: !Sub ${ProjectName}-PipelineName
+  # Pipeline count for monitoring
+  ActivePipelineCount:
+    Description: Number of active pipelines in this environment
+    Value: !Length !Ref ProjectsConfig
+    Export:
+      Name: !Sub "${ProjectName}-ActivePipelineCount-${Environment}"

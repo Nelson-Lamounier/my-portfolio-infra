@@ -1,72 +1,370 @@
 # @format
----
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Security groups for ECS services
+
+Description: |
+  Dynamic ECS Security Groups for EC2-based services with ALB integration
+  
+  Supports dynamic port mapping (hostPort: 0) with proper health check configuration
+  and environment-specific security isolation.
 
 Parameters:
+  # Environment Parameter
   Environment:
     Type: String
     Description: Environment name for resource naming and isolation
     Default: "dev"
     AllowedValues: ["dev", "staging", "production"]
 
+  # Project Configuration
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  # VPC Configuration
+  VPCId:
+    Type: String
+    Description: VPC ID where security groups will be created
+    Default: ""
+
+  # Load Balancer Security Group
+  LoadBalancerSecurityGroupId:
+    Type: String
+    Description: Security Group ID of the Application Load Balancer
+    Default: ""
+
+  # Optional Database Configuration
+  EnableDatabaseAccess:
+    Type: String
+    Description: Enable database security group creation
+    Default: "true"
+    AllowedValues: ["true", "false"]
+
+Mappings:
+  # Enhanced environment-specific port configurations
+  PortMap:
+    dev:
+      # Broader range for development flexibility
+      EphemeralPortStart: 32768
+      EphemeralPortEnd: 49151  # More restricted upper bound
+      AllowedCIDR: "10.0.0.0/24"  # More specific CIDR
+      AllowSSH: true
+      DebugCIDR: "10.0.0.0/28"  # Very specific CIDR for debug access
+    staging:
+      # More restricted range for staging
+      EphemeralPortStart: 49152
+      EphemeralPortEnd: 61440   # Smaller range
+      AllowedCIDR: "10.0.0.0/24"
+      AllowSSH: false
+      DebugCIDR: "10.0.0.0/28"
+    production:
+      # Most restricted range for production
+      EphemeralPortStart: 49152
+      EphemeralPortEnd: 57344   # Very restricted range
+      AllowedCIDR: "10.0.0.0/28"  # Very specific CIDR
+      AllowSSH: false
+      DebugCIDR: ""  # No debug access
+
+  # Environment-specific security settings
+  SecurityMap:
+    dev:
+      EnableDebugPorts: true
+      RestrictEgress: false
+      LogSecurityEvents: false
+      AllowDirectDatabaseAccess: true
+    staging:
+      EnableDebugPorts: true
+      RestrictEgress: false
+      LogSecurityEvents: true
+      AllowDirectDatabaseAccess: false
+    production:
+      EnableDebugPorts: false
+      RestrictEgress: true
+      LogSecurityEvents: true
+      AllowDirectDatabaseAccess: false
+
+Conditions:
+  # Environment conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsStaging: !Equals [!Ref Environment, "staging"]
+  IsDevelopment: !Equals [!Ref Environment, "dev"]
+  
+  # Feature conditions
+  HasVPC: !Not [!Equals [!Ref VPCId, ""]]
+  HasLoadBalancer: !Not [!Equals [!Ref LoadBalancerSecurityGroupId, ""]]
+  AllowSSH: !FindInMap [PortMap, !Ref Environment, AllowSSH]
+  EnableDebugPorts: !FindInMap [SecurityMap, !Ref Environment, EnableDebugPorts]
+  RestrictEgress: !FindInMap [SecurityMap, !Ref Environment, RestrictEgress]
+  EnableDatabase: !Equals [!Ref EnableDatabaseAccess, "true"]
+  AllowDirectDBAccess: !FindInMap [SecurityMap, !Ref Environment, AllowDirectDatabaseAccess]
+
 Resources:
-  # Security group for ECS tasks
+  # Enhanced ECS Task Security Group
   ECSTaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "ECS-TaskSecurityGroup-${Environment}"
-      GroupDescription: !Sub "Security group for ECS tasks in ${Environment} environment"
-      VpcId: !ImportValue 
-        Fn::Sub: "VPC-${Environment}"
+      GroupName: !Sub "${ProjectName}-ECS-TaskSG-${Environment}"
+      GroupDescription: !Sub "Security group for ${ProjectName} ECS tasks with dynamic port mapping in ${Environment}"
+      VpcId: !If
+        - HasVPC
+        - !Ref VPCId
+        - !ImportValue 
+          Fn::Sub: "${ProjectName}-VPC-${Environment}"
+      
       SecurityGroupIngress:
-        # Allow traffic from ALB on application ports
+        # ALB to ECS Task communication on ephemeral ports (for dynamic port mapping)
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
-          Description: "Allow HTTP traffic from ALB"
-        
-        - IpProtocol: tcp
-          FromPort: 8080
-          ToPort: 8080
-          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
-          Description: "Allow traffic from ALB on port 8080"
-        
+          FromPort: !FindInMap [PortMap, !Ref Environment, EphemeralPortStart]
+          ToPort: !FindInMap [PortMap, !Ref Environment, EphemeralPortEnd]
+          SourceSecurityGroupId: !If
+            - HasLoadBalancer
+            - !Ref LoadBalancerSecurityGroupId
+            - !ImportValue 
+              Fn::Sub: "${ProjectName}-LoadBalancerSGId-${Environment}"
+          Description: !Sub "Allow ALB traffic on ephemeral ports for dynamic mapping (${Environment})"
+
+        # Specific application ports (for static port mapping compatibility)
         - IpProtocol: tcp
           FromPort: 3000
-          ToPort: 4000
-          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
-          Description: "Allow traffic from ALB on app ports 3000-4000"
-        
-        # Dynamic port range for ECS tasks
+          ToPort: 3000
+          SourceSecurityGroupId: !If
+            - HasLoadBalancer
+            - !Ref LoadBalancerSecurityGroupId
+            - !ImportValue 
+              Fn::Sub: "${ProjectName}-LoadBalancerSGId-${Environment}"
+          Description: "Allow ALB traffic on port 3000 (Portfolio app)"
+
+        # Inter-service communication within the same environment
         - IpProtocol: tcp
-          FromPort: 32768
-          ToPort: 65535
-          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
-          Description: "Allow traffic from ALB on ephemeral ports"
-      
-      SecurityGroupEgress:
-        # Allow all outbound traffic (for pulling images, etc.)
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-          Description: "Allow all outbound traffic"
-      
+          FromPort: 3000
+          ToPort: 8080  # More restricted range
+          SourceSecurityGroupId: !Ref ECSTaskSecurityGroup
+          Description: "Allow inter-service communication between ECS tasks"
+
+        # Enhanced SSH access with more restrictive CIDR
+        - !If
+          - AllowSSH
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !FindInMap [PortMap, !Ref Environment, AllowedCIDR]
+            Description: "Allow SSH access for development (restricted CIDR)"
+          - !Ref AWS::NoValue
+
+        # Enhanced debug ports with very restrictive CIDR
+        - !If
+          - EnableDebugPorts
+          - IpProtocol: tcp
+            FromPort: 9229
+            ToPort: 9229
+            CidrIp: !FindInMap [PortMap, !Ref Environment, DebugCIDR]
+            Description: "Allow Node.js debug port (development only)"
+          - !Ref AWS::NoValue
+
+      SecurityGroupEgress: !If
+        - RestrictEgress
+        # Production: Enhanced restricted egress rules
+        - - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+            Description: "Allow HTTPS outbound for ECR and external APIs"
+          # Remove HTTP for production
+          # Enhanced VPC endpoint access
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: !FindInMap [PortMap, !Ref Environment, AllowedCIDR]
+            Description: "Allow HTTPS to VPC endpoints"
+          # Database access with specific security group reference
+          - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            DestinationSecurityGroupId: !If [EnableDatabase, !Ref DatabaseSecurityGroup, !Ref AWS::NoValue]
+            Description: "Allow PostgreSQL access to database"
+          # DNS resolution
+          - IpProtocol: udp
+            FromPort: 53
+            ToPort: 53
+            CidrIp: !FindInMap [PortMap, !Ref Environment, AllowedCIDR]
+            Description: "Allow DNS resolution within VPC"
+        # Dev/Staging: More controlled egress
+        - - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+            Description: "Allow HTTPS outbound"
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+            Description: "Allow HTTP outbound (dev/staging)"
+          - IpProtocol: udp
+            FromPort: 53
+            ToPort: 53
+            CidrIp: 0.0.0.0/0
+            Description: "Allow DNS resolution"
+
       Tags:
         - Key: Name
-          Value: !Sub "ECS-TaskSecurityGroup-${Environment}"
+          Value: !Sub "${ProjectName}-ECS-TaskSG-${Environment}"
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "ECS Task Security with Dynamic Port Mapping"
+        - Key: ManagedBy
+          Value: "CloudFormation"
+
+  # ECS Container Instance Security Group (for EC2 instances)
+  ECSInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectName}-ECS-InstanceSG-${Environment}"
+      GroupDescription: !Sub "Security group for ${ProjectName} ECS EC2 instances in ${Environment}"
+      VpcId: !If
+        - HasVPC
+        - !Ref VPCId
+        - !ImportValue 
+          Fn::Sub: "${ProjectName}-VPC-${Environment}"
+
+      SecurityGroupIngress:
+        # SSH access for management
+        - !If
+          - AllowSSH
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            CidrIp: !FindInMap [PortMap, !Ref Environment, AllowedCIDR]
+            Description: "Allow SSH access for instance management"
+          - !Ref AWS::NoValue
+
+        # ECS Agent communication ports
+        - IpProtocol: tcp
+          FromPort: 51678
+          ToPort: 51679
+          CidrIp: !FindInMap [PortMap, !Ref Environment, AllowedCIDR]
+          Description: "Allow ECS agent communication"
+
+        # Allow all traffic from ALB on ephemeral ports (containers are on these instances)
+        - IpProtocol: tcp
+          FromPort: !FindInMap [PortMap, !Ref Environment, EphemeralPortStart]
+          ToPort: !FindInMap [PortMap, !Ref Environment, EphemeralPortEnd]
+          SourceSecurityGroupId: !If
+            - HasLoadBalancer
+            - !Ref LoadBalancerSecurityGroupId
+            - !ImportValue 
+              Fn::Sub: "${ProjectName}-LoadBalancerSGId-${Environment}"
+          Description: "Allow ALB traffic on ephemeral ports to EC2 instances"
+
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound traffic for ECS agent and container operations"
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ECS-InstanceSG-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "ECS EC2 Instance Security"
+
+  # Enhanced Database Security Group
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EnableDatabase
+    Properties:
+      GroupName: !Sub "${ProjectName}-Database-SG-${Environment}"
+      GroupDescription: !Sub "Security group for ${ProjectName} databases in ${Environment}"
+      VpcId: !If
+        - HasVPC
+        - !Ref VPCId
+        - !ImportValue 
+          Fn::Sub: "${ProjectName}-VPC-${Environment}"
+
+      SecurityGroupIngress:
+        # PostgreSQL access from ECS tasks only
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSTaskSecurityGroup
+          Description: "Allow PostgreSQL access from ECS tasks only"
+
+        # MySQL access from ECS tasks only
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref ECSTaskSecurityGroup
+          Description: "Allow MySQL access from ECS tasks only"
+
+        # Enhanced development direct database access with smaller CIDR
+        - !If
+          - AllowDirectDBAccess
+          - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            CidrIp: !FindInMap [PortMap, !Ref Environment, AllowedCIDR]
+            Description: "Allow direct PostgreSQL access for development (restricted CIDR)"
+          - !Ref AWS::NoValue
+
+      # No egress rules needed for database security group
+      SecurityGroupEgress: []
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-Database-SG-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "Database Access Control"
+        - Key: ManagedBy
+          Value: "CloudFormation"
 
 Outputs:
+  # ECS Task Security Group outputs
   ECSTaskSecurityGroupId:
-    Description: ID of the ECS task security group
+    Description: ID of the ECS task security group for dynamic port mapping
     Value: !Ref ECSTaskSecurityGroup
     Export:
-      Name: !Sub "ECSTaskSecurityGroupId-${Environment}"
+      Name: !Sub "${ProjectName}-ECSTaskSecurityGroupId-${Environment}"
 
   ECSTaskSecurityGroupName:
     Description: Name of the ECS task security group
     Value: !Ref ECSTaskSecurityGroup
     Export:
-      Name: !Sub "ECSTaskSecurityGroupName-${Environment}"
+      Name: !Sub "${ProjectName}-ECSTaskSecurityGroupName-${Environment}"
+
+  # ECS Instance Security Group outputs
+  ECSInstanceSecurityGroupId:
+    Description: ID of the ECS instance security group
+    Value: !Ref ECSInstanceSecurityGroup
+    Export:
+      Name: !Sub "${ProjectName}-ECSInstanceSecurityGroupId-${Environment}"
+
+  # Database Security Group outputs (conditional)
+  DatabaseSecurityGroupId:
+    Description: ID of the database security group
+    Value: !If [EnableDatabase, !Ref DatabaseSecurityGroup, ""]
+    Export:
+      Name: !Sub "${ProjectName}-DatabaseSecurityGroupId-${Environment}"
+    Condition: EnableDatabase
+
+  # Configuration summary
+  SecurityConfigSummary:
+    Description: Environment-specific security configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Project: ${ProjectName}
+      Ephemeral Port Range: ${PortMap.${Environment}.EphemeralPortStart}-${PortMap.${Environment}.EphemeralPortEnd}
+      SSH Access: ${PortMap.${Environment}.AllowSSH}
+      Debug Ports: ${SecurityMap.${Environment}.EnableDebugPorts}
+      Restricted Egress: ${SecurityMap.${Environment}.RestrictEgress}
+      Database Access: ${EnableDatabaseAccess}
+    Export:
+      Name: !Sub "${ProjectName}-SecurityConfig-${Environment}"

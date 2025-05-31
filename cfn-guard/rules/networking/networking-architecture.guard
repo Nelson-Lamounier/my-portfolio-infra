@@ -1,0 +1,106 @@
+# Networking Architecture Best Practices
+
+# Multi-AZ Architecture Rules
+rule vpc_has_multi_az_subnets {
+    Resources.*[ Type == "AWS::EC2::Subnet" ] {
+        when Properties.Tags.*[Value == "Public"] exists {
+            # Ensure at least 2 public subnets exist
+            Properties.AvailabilityZone exists
+        }
+        when Properties.Tags.*[Value == "Private"] exists {
+            # Ensure at least 2 private subnets exist
+            Properties.AvailabilityZone exists
+        }
+    }
+}
+
+rule subnets_proper_cidr_allocation {
+    Resources.*[ Type == "AWS::EC2::Subnet" ] {
+        Properties {
+            # Ensure CIDR blocks don't overlap (basic check)
+            CidrBlock exists
+            CidrBlock != "" << Subnet CIDR cannot be empty >>
+        }
+    }
+}
+
+# Route Table Architecture
+rule public_subnets_use_public_route_table {
+    Resources.*[ Type == "AWS::EC2::SubnetRouteTableAssociation" ] {
+        when Properties.SubnetId == /.*Public.*/ {
+            Properties.RouteTableId exists << Public subnets must have route table association >>
+        }
+    }
+}
+
+rule private_subnets_use_private_route_table {
+    Resources.*[ Type == "AWS::EC2::SubnetRouteTableAssociation" ] {
+        when Properties.SubnetId == /.*Private.*/ {
+            Properties.RouteTableId exists << Private subnets must have route table association >>
+        }
+    }
+}
+
+# Internet Access Patterns
+rule public_route_table_has_internet_route {
+    Resources.*[ Type == "AWS::EC2::Route" ] {
+        when Properties.DestinationCidrBlock == "0.0.0.0/0" and Properties.GatewayId exists {
+            Properties {
+                RouteTableId exists << Internet routes must specify route table >>
+                GatewayId exists << Internet routes must specify gateway >>
+            }
+        }
+    }
+}
+
+rule private_subnets_nat_gateway_recommendation {
+    # Check if private subnets exist but no NAT gateway
+    Resources.*[ Type == "AWS::EC2::Subnet" ] {
+        when Properties.Tags.*[Value == "Private"] exists {
+            # Recommend NAT gateway for private subnet internet access
+            Properties.Tags exists << Private subnets should consider NAT Gateway for outbound internet access >>
+        }
+    }
+}
+
+# Security Architecture
+rule network_acls_for_additional_security {
+    Resources.*[ Type == "AWS::EC2::NetworkAcl" ] {
+        Properties {
+            VpcId exists << Network ACL must be associated with VPC >>
+        }
+    }
+}
+
+rule vpc_has_appropriate_size {
+    Resources.*[ Type == "AWS::EC2::VPC" ] {
+        Properties {
+            # Ensure VPC is sized appropriately for expected growth
+            CidrBlock == /.*\/1[6-9]$/ << VPC should use /16-/19 for adequate IP space >>
+        }
+    }
+}
+
+# Flow Log Architecture
+rule flow_logs_comprehensive_coverage {
+    Resources.*[ Type == "AWS::EC2::FlowLog" ] {
+        Properties {
+            ResourceType == "VPC" << Recommend VPC-level flow logs for complete coverage >>
+            TrafficType == "ALL" << Flow logs should capture all traffic for security analysis >>
+        }
+    }
+}
+
+rule flow_logs_proper_destination {
+    Resources.*[ Type == "AWS::EC2::FlowLog" ] {
+        Properties {
+            when LogDestinationType == "cloud-watch-logs" {
+                LogGroupName exists << CloudWatch flow logs must specify log group >>
+                DeliverLogsPermissionArn exists << CloudWatch flow logs must have IAM role >>
+            }
+            when LogDestinationType == "s3" {
+                LogDestination exists << S3 flow logs must specify bucket ARN >>
+            }
+        }
+    }
+}

@@ -1,0 +1,214 @@
+# Dedicated ECS Network Security Rules
+
+# ECS Task Security Group Rules
+rule ecs_task_security_group_dynamic_ports {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Task.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort >= 32768 {
+                    SourceSecurityGroupId exists << Dynamic port ranges should use security group references >>
+                    Description == /.*ALB.*/ or Description == /.*load.*balancer.*/ << Dynamic ports should be for load balancer access >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_task_security_group_application_ports {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Task.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort in [3000, 8080, 5000, 8000] {
+                    SourceSecurityGroupId exists << Application ports should use security group references >>
+                    ToPort == FromPort << Application ports should be specific, not ranges >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_task_inter_service_communication {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Task.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when Description == /.*inter-service.*/ {
+                    SourceSecurityGroupId exists << Inter-service communication should use security group references >>
+                    FromPort >= 3000 << Inter-service ports should be in application range >>
+                    ToPort <= 9000 << Inter-service ports should be limited to application range >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_task_debug_port_restrictions {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Task.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort in [9229, 5005] {
+                    CidrIp == /^10\.0\..*/ << Debug ports should be restricted to development networks >>
+                    Description == /.*debug.*/ << Debug port rules should be clearly labeled >>
+                }
+            }
+        }
+    }
+}
+
+# ECS Instance Security Group Rules
+rule ecs_instance_security_group_management {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Instance.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort == 22 {
+                    CidrIp != "0.0.0.0/0" << SSH access should not be open to internet >>
+                    CidrIp == /^10\..*/ << SSH should be limited to private networks >>
+                }
+                when FromPort in [51678, 51679] {
+                    CidrIp == /^10\..*/ << ECS agent ports should be limited to VPC >>
+                    Description == /.*ECS.*agent.*/ << ECS agent rules should be clearly labeled >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_instance_ephemeral_port_mapping {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Instance.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort >= 32768 {
+                    SourceSecurityGroupId exists << Instance ephemeral ports should use security group references >>
+                    Description == /.*ALB.*/ << Instance ports should be for ALB access >>
+                }
+            }
+        }
+    }
+}
+
+# Database Security Group Rules
+rule ecs_database_security_isolation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*Database.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort in [3306, 5432, 6379] {
+                    SourceSecurityGroupId exists << Database access should only be from ECS tasks >>
+                    SourceSecurityGroupId == /.*ECS.*Task.*/ << Database should only allow ECS task access >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_database_direct_access_restrictions {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*Database.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when CidrIp exists and FromPort in [3306, 5432, 6379] {
+                    # Direct database access should be limited
+                    CidrIp == /^10\.0\..*/ << Direct database access should be limited to specific subnets >>
+                    Description == /.*development.*/ << Direct access should only be for development >>
+                }
+            }
+        }
+    }
+}
+
+# Production Environment Security Rules
+rule ecs_production_egress_security {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*/ and Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.SecurityGroupEgress[*] {
+                when IpProtocol == "-1" {
+                    CidrIp != "0.0.0.0/0" << Production ECS should not allow unrestricted outbound >>
+                }
+                when FromPort == 80 {
+                    # HTTP should be limited in production
+                    DestinationSecurityGroupId exists or CidrIp == /^10\..*/ << HTTP traffic should be internal only >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_production_ingress_security {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*/ and Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort in [9229, 5005, 22] {
+                    # Debug and SSH ports should not exist in production
+                    this !exists << Debug and SSH ports should not be open in production >>
+                }
+            }
+        }
+    }
+}
+
+# Environment-Specific Port Range Validation
+rule ecs_development_port_range_validation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*/ and Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort == 32768 and ToPort == 65535 {
+                    # Development can have broader ranges but should be justified
+                    Description == /.*development.*/ or Description == /.*flexible.*/ << Wide port ranges should be justified >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_production_port_range_restrictions {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*/ and Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort >= 49152 {
+                    ToPort <= 65535 << Production should use restricted ephemeral port ranges >>
+                    ToPort - FromPort <= 16384 << Production port ranges should be limited >>
+                }
+            }
+        }
+    }
+}
+
+# ALB Integration Security
+rule ecs_alb_integration_validation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Task.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when SourceSecurityGroupId exists and Description == /.*ALB.*/ {
+                    FromPort in [3000, 8080, 5000] or FromPort >= 32768 << ALB access should be on application or ephemeral ports >>
+                }
+            }
+        }
+    }
+}
+
+# Security Group Reference Validation
+rule ecs_security_group_reference_validation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when SourceSecurityGroupId exists {
+                    SourceSecurityGroupId != "" << Security group references cannot be empty >>
+                    # Should reference other security groups in same environment
+                    SourceSecurityGroupId == /.*${Environment}.*/ or 
+                    SourceSecurityGroupId == !Ref /.*SecurityGroup/ << Referenced security groups should be environment-specific >>
+                }
+            }
+        }
+    }
+}
+
+# Container Network Isolation
+rule ecs_container_network_isolation {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*Task.*/ {
+            Properties.SecurityGroupEgress[*] {
+                when DestinationSecurityGroupId == /.*Database.*/ {
+                    FromPort in [3306, 5432, 6379] << Database connections should be on specific ports >>
+                    Description == /.*database.*/ << Database egress should be clearly labeled >>
+                }
+            }
+        }
+    }
+}

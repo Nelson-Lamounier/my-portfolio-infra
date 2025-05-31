@@ -71,6 +71,12 @@ Parameters:
     Type: String
     Default: ""
 
+  # Project Name Parameter
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
   # TTL Configuration
   DefaultTTL:
     Description: Default TTL for DNS records (in seconds)
@@ -78,6 +84,7 @@ Parameters:
     Default: 300
     MinValue: 60
     MaxValue: 86400
+    ConstraintDescription: TTL must be between 60 seconds and 24 hours
 
 Conditions:
   # Environment-specific conditions
@@ -94,7 +101,7 @@ Conditions:
 Transform: AWS::LanguageExtensions
 
 Resources:
-  # Dynamic DNS Records using Transform
+  # Enhanced DNS Records with better security
   Fn::ForEach::DNSRecords:
     - DomainConfig
     - !Ref DomainsConfig
@@ -105,24 +112,22 @@ Resources:
           - true
         Properties:
           HostedZoneId: !Ref HostedZoneId
-          # Dynamic domain name with optional environment prefix
           Name: !If
             - HasEnvironmentPrefix
             - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
             - !Ref ${DomainConfig.domain}
           Type: A
           # Environment-specific TTL
-          SetIdentifier: !Sub "${Environment}-${DomainConfig.name}"
+          TTL: !If [IsProduction, 1800, 300]  # 30 min for prod, 5 min for dev
+          SetIdentifier: !Sub "${ProjectName}-${Environment}-${DomainConfig.name}"
           Weight: 100
           AliasTarget:
-            # Environment-specific ALB import
             DNSName: !ImportValue 
-              Fn::Sub: "LoadBalancerDNSName-${Environment}"
+              Fn::Sub: "${ProjectName}-LoadBalancerDNSName-${Environment}"
             HostedZoneId: !ImportValue 
-              Fn::Sub: "LoadBalancerCanonicalHostedZoneID-${Environment}"
+              Fn::Sub: "${ProjectName}-LoadBalancerCanonicalHostedZoneID-${Environment}"
             EvaluateTargetHealth: true
-          # Add comment for identification
-          Comment: !Sub "${Environment} - ${DomainConfig.description}"
+          Comment: !Sub "${ProjectName} ${Environment} - ${DomainConfig.description}"
 
   # Health Check for Production (Optional)
   Fn::ForEach::HealthChecks:
@@ -150,11 +155,13 @@ Resources:
           FailureThreshold: 3
           Tags:
             - Key: Name
-              Value: !Sub "${Environment}-${DomainConfig.name}-HealthCheck"
+              Value: !Sub "${ProjectName}-${Environment}-${DomainConfig.name}-HealthCheck"
             - Key: Environment
               Value: !Ref Environment
             - Key: Domain
               Value: !Ref ${DomainConfig.domain}
+            - Key: Project
+              Value: !Ref ProjectName
 
   # AAAA Records for IPv6 (Optional)
   Fn::ForEach::IPv6Records:

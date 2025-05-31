@@ -65,7 +65,7 @@ Resources:
       Roles:
         - !Ref ECSInstanceRole
 
-  # Security Group for EC2 instances (NOT for ECS tasks)
+  # Enhanced Security Group with restricted access
   EC2InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -74,33 +74,36 @@ Resources:
       VpcId: !ImportValue 
         Fn::Sub: "VPC-${Environment}"
       SecurityGroupIngress:
-        # SSH access for administration
+        # SSH access with restricted CIDR (update CidrIp parameter)
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref CidrIp
-          Description: "SSH access for administration"
+          Description: "SSH access for administration (restrict CIDR for production)"
         
         # Dynamic port range for ECS tasks
         - IpProtocol: tcp
           FromPort: 32768
           ToPort: 65535
-          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          SourceSecurityGroupId: !ImportValue 
+            Fn::Sub: "LoadBalancerSGId-${Environment}"
           Description: "Dynamic ports for ECS tasks from ALB"
       
       SecurityGroupEgress:
-        # All outbound traffic (for updates, ECR pulls, etc.)
+        # All outbound traffic (documented requirement)
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
-          Description: "All outbound traffic"
+          Description: "All outbound traffic for system updates, ECR pulls, and ECS agent communication"
       
       Tags:
         - Key: Name
           Value: !Sub "EC2-InstanceSG-${Environment}"
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: "Portfolio"
 
-  # Launch Template
+  # Enhanced Launch Template with security improvements
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -108,20 +111,43 @@ Resources:
       LaunchTemplateData:
         InstanceType: !Ref ECSInstanceType 
         ImageId: !Ref ECSAMI
-        KeyName: !Ref KeyPairName
+        KeyName: !Sub "${KeyPairName}-${Environment}"  # Environment-specific keys
         IamInstanceProfile:
           Arn: !GetAtt InstanceProfile.Arn
         SecurityGroupIds:
           - !Ref EC2InstanceSecurityGroup
+        # Enhanced metadata security
         MetadataOptions:
           HttpTokens: required
           HttpEndpoint: enabled
+          HttpPutResponseHopLimit: 1
+          InstanceMetadataTags: enabled
+        # EBS encryption configuration
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: 30
+              Encrypted: true
+              DeleteOnTermination: true
+              Iops: 3000
+              Throughput: 125
+        # Monitoring configuration based on environment
+        Monitoring:
+          Enabled: !If [IsProduction, true, false]
+        # No public IP assignment
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: false
+            DeviceIndex: 0
+            Groups:
+              - !Ref EC2InstanceSecurityGroup
         UserData: !Base64
           Fn::Sub: |
             #!/bin/bash
             # Configure ECS agent
             echo ECS_CLUSTER=${ECSClusterNameParam} >> /etc/ecs/ecs.config
             echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
+            echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config
             
             # Update system
             yum update -y
@@ -129,7 +155,32 @@ Resources:
             # Install CloudWatch agent
             yum install -y amazon-cloudwatch-agent
             
-            # Start ECS agent
+            # Configure CloudWatch agent for container insights
+            cat <<EOF > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+            {
+              "agent": {
+                "metrics_collection_interval": 60,
+                "run_as_user": "cwagent"
+              },
+              "logs": {
+                "logs_collected": {
+                  "files": {
+                    "collect_list": [
+                      {
+                        "file_path": "/var/log/ecs/ecs-agent.log",
+                        "log_group_name": "/aws/ecs/containerinsights/${ECSClusterNameParam}/performance",
+                        "log_stream_name": "{instance_id}"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            EOF
+            
+            # Start services
+            systemctl enable amazon-cloudwatch-agent
+            systemctl start amazon-cloudwatch-agent
             systemctl enable ecs
             systemctl start ecs
         TagSpecifications:
@@ -137,6 +188,16 @@ Resources:
             Tags:
               - Key: Name
                 Value: !Sub "ECS-Instance-${Environment}"
+              - Key: Environment
+                Value: !Ref Environment
+              - Key: Project
+                Value: "Portfolio"
+              - Key: Component
+                Value: "ECS-Instance"
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub "ECS-Instance-Volume-${Environment}"
               - Key: Environment
                 Value: !Ref Environment
 

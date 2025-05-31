@@ -1,17 +1,19 @@
 # @format
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Auto Scaling Group for ECS instances
+Description: Environment-aware Auto Scaling Group for ECS instances with enhanced monitoring and cost optimization
 
 Parameters:
   Environment:
     Description: Environment name for resource naming and isolation
     Type: String
-    AllowedValues:
-      - dev
-      - staging
-      - production
+    AllowedValues: ["dev", "staging", "production"]
     Default: dev
+
+  ProjectName:
+    Description: Project name for resource naming
+    Type: String
+    Default: "Portfolio"
 
   MinSize:
     Description: Minimum number of instances
@@ -28,18 +30,50 @@ Parameters:
     Type: Number
     Default: 1
 
+  # Target CPU utilization for target tracking scaling
+  TargetCPUUtilization:
+    Description: Target CPU utilization percentage for auto scaling
+    Type: Number
+    Default: 70
+    MinValue: 50
+    MaxValue: 90
+
+Mappings:
+  # Environment-specific configurations
+  EnvironmentMap:
+    dev:
+      InstanceProtection: false
+      WarmPoolEnabled: false
+      MaxBatchSize: 1
+      ScaleUpCooldown: 300
+      ScaleDownCooldown: 600
+    staging:
+      InstanceProtection: false
+      WarmPoolEnabled: true
+      MaxBatchSize: 1
+      ScaleUpCooldown: 300
+      ScaleDownCooldown: 600
+    production:
+      InstanceProtection: true
+      WarmPoolEnabled: true
+      MaxBatchSize: 1
+      ScaleUpCooldown: 180
+      ScaleDownCooldown: 900
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, "production"]
+  EnableWarmPool: !FindInMap [EnvironmentMap, !Ref Environment, WarmPoolEnabled]
+
 Resources:
+  # Auto Scaling Group with enhanced configuration
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     UpdatePolicy:
       AutoScalingRollingUpdate:
-        MinInstancesInService: !If
-          - !Equals [!Ref Environment, "production"]
-          - 1
-          - 0
-        MaxBatchSize: 1
-        PauseTime: PT5M
-        WaitOnResourceSignals: false
+        MinInstancesInService: !If [IsProduction, 1, 0]
+        MaxBatchSize: !FindInMap [EnvironmentMap, !Ref Environment, MaxBatchSize]
+        PauseTime: PT10M
+        WaitOnResourceSignals: true
         SuspendProcesses:
           - HealthCheck
           - ReplaceUnhealthy
@@ -47,27 +81,25 @@ Resources:
           - AlarmNotification
           - ScheduledActions
     Properties:
-      AutoScalingGroupName: !Sub "ECS-ASG-${Environment}"
+      AutoScalingGroupName: !Sub "${ProjectName}-ECS-ASG-${Environment}"
       MinSize: !Ref MinSize
       MaxSize: !Ref MaxSize
       DesiredCapacity: !Ref DesiredCapacity
       VPCZoneIdentifier:
         - !ImportValue 
-          Fn::Sub: "PublicSubnet1-${Environment}"
+          Fn::Sub: "${ProjectName}-PrivateSubnet1-${Environment}"
         - !ImportValue 
-          Fn::Sub: "PublicSubnet2-${Environment}"
+          Fn::Sub: "${ProjectName}-PrivateSubnet2-${Environment}"
       LaunchTemplate:
         LaunchTemplateId: !ImportValue 
-          Fn::Sub: "LaunchTemplateId-${Environment}"
+          Fn::Sub: "${ProjectName}-LaunchTemplateId-${Environment}"
         Version: !ImportValue 
-          Fn::Sub: "LaunchTemplateVersion-${Environment}"
+          Fn::Sub: "${ProjectName}-LaunchTemplateVersion-${Environment}"
       HealthCheckType: EC2
       HealthCheckGracePeriod: 300
       DefaultCooldown: 300
-      CapacityRebalance: !If
-        - !Equals [!Ref Environment, "production"]
-        - true
-        - false
+      CapacityRebalance: !FindInMap [EnvironmentMap, !Ref Environment, InstanceProtection]
+      NewInstancesProtectedFromScaleIn: !FindInMap [EnvironmentMap, !Ref Environment, InstanceProtection]
       TerminationPolicies:
         - OldestInstance
         - Default
@@ -80,9 +112,16 @@ Resources:
         - GroupPendingInstances
         - GroupStandbyInstances
         - GroupTerminatingInstances
+      NotificationConfigurations:
+        - TopicARN: !Ref ScalingNotificationTopic
+          NotificationTypes:
+            - autoscaling:EC2_INSTANCE_LAUNCH
+            - autoscaling:EC2_INSTANCE_TERMINATE
+            - autoscaling:EC2_INSTANCE_LAUNCH_ERROR
+            - autoscaling:EC2_INSTANCE_TERMINATE_ERROR
       Tags:
         - Key: Name
-          Value: !Sub "ECSInstance-${Environment}"
+          Value: !Sub "${ProjectName}-ECSInstance-${Environment}"
           PropagateAtLaunch: true
         - Key: AmazonECSManaged
           Value: "true"
@@ -91,111 +130,66 @@ Resources:
           Value: !Ref Environment
           PropagateAtLaunch: true
         - Key: Project
-          Value: "Portfolio"
+          Value: !Ref ProjectName
           PropagateAtLaunch: true
         - Key: Component
           Value: "ECS-AutoScaling"
           PropagateAtLaunch: true
 
-  # Scale Up Policy
-  ScaleUpPolicy:
+  # Target Tracking Scaling Policy (Better than Simple Scaling)
+  TargetTrackingScalingPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
-      AdjustmentType: ChangeInCapacity
       AutoScalingGroupName: !Ref AutoScalingGroup
-      Cooldown: 300
-      ScalingAdjustment: 1
-      PolicyType: SimpleScaling
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: !Ref TargetCPUUtilization
+        ScaleOutCooldown: !FindInMap [EnvironmentMap, !Ref Environment, ScaleUpCooldown]
+        ScaleInCooldown: !FindInMap [EnvironmentMap, !Ref Environment, ScaleDownCooldown]
+        DisableScaleIn: false
 
-  # Scale Down Policy
-  ScaleDownPolicy:
-    Type: AWS::AutoScaling::ScalingPolicy
+  # SNS Topic for Scaling Notifications
+  ScalingNotificationTopic:
+    Type: AWS::SNS::Topic
     Properties:
-      AdjustmentType: ChangeInCapacity
+      TopicName: !Sub "${ProjectName}-ASG-Notifications-${Environment}"
+      DisplayName: !Sub "Auto Scaling Group notifications for ${Environment}"
+
+  # Optional Warm Pool for Cost Optimization
+  WarmPool:
+    Type: AWS::AutoScaling::WarmPool
+    Condition: EnableWarmPool
+    Properties:
       AutoScalingGroupName: !Ref AutoScalingGroup
-      Cooldown: 300
-      ScalingAdjustment: -1
-      PolicyType: SimpleScaling
-
-  # CPU High Alarm
-  CPUHighAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "ECS-CPUHigh-${Environment}"
-      AlarmDescription: !Sub "CPU utilization high for ECS instances in ${Environment}"
-      MetricName: CPUUtilization
-      Namespace: AWS/EC2
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: !If
-        - !Equals [!Ref Environment, "production"]
-        - 70
-        - 80
-      ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: AutoScalingGroupName
-          Value: !Ref AutoScalingGroup
-      AlarmActions:
-        - !Ref ScaleUpPolicy
-      TreatMissingData: notBreaching
-
-  # CPU Low Alarm
-  CPULowAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "ECS-CPULow-${Environment}"
-      AlarmDescription: !Sub "CPU utilization low for ECS instances in ${Environment}"
-      MetricName: CPUUtilization
-      Namespace: AWS/EC2
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 3
-      Threshold: !If
-        - !Equals [!Ref Environment, "production"]
-        - 30
-        - 20
-      ComparisonOperator: LessThanThreshold
-      Dimensions:
-        - Name: AutoScalingGroupName
-          Value: !Ref AutoScalingGroup
-      AlarmActions:
-        - !Ref ScaleDownPolicy
-      TreatMissingData: notBreaching
+      MinSize: 0
+      MaxGroupPreparedCapacity: 2
+      PoolState: Stopped  # Cost-effective for non-production
+      InstanceReusePolicy:
+        ReuseOnScaleIn: true
 
 Outputs:
   AutoScalingGroupName:
     Description: Name of the Auto Scaling Group
     Value: !Ref AutoScalingGroup
     Export:
-      Name: !Sub "AutoScalingGroupName-${Environment}"
+      Name: !Sub "${ProjectName}-AutoScalingGroupName-${Environment}"
 
   AutoScalingGroupArn:
     Description: ARN of the Auto Scaling Group
     Value: !Ref AutoScalingGroup
     Export:
-      Name: !Sub "AutoScalingGroupArn-${Environment}"
+      Name: !Sub "${ProjectName}-AutoScalingGroupArn-${Environment}"
 
-  ScaleUpPolicyArn:
-    Description: ARN of the scale up policy
-    Value: !Ref ScaleUpPolicy
+  TargetTrackingPolicyArn:
+    Description: ARN of the target tracking scaling policy
+    Value: !Ref TargetTrackingScalingPolicy
     Export:
-      Name: !Sub "ScaleUpPolicyArn-${Environment}"
+      Name: !Sub "${ProjectName}-TargetTrackingPolicyArn-${Environment}"
 
-  ScaleDownPolicyArn:
-    Description: ARN of the scale down policy
-    Value: !Ref ScaleDownPolicy
+  ScalingNotificationTopicArn:
+    Description: ARN of the scaling notification topic
+    Value: !Ref ScalingNotificationTopic
     Export:
-      Name: !Sub "ScaleDownPolicyArn-${Environment}"
-
-  CPUHighAlarmArn:
-    Description: ARN of the CPU high alarm
-    Value: !Ref CPUHighAlarm
-    Export:
-      Name: !Sub "CPUHighAlarmArn-${Environment}"
-
-  CPULowAlarmArn:
-    Description: ARN of the CPU low alarm
-    Value: !Ref CPULowAlarm
-    Export:
-      Name: !Sub "CPULowAlarmArn-${Environment}"
+      Name: !Sub "${ProjectName}-ScalingNotificationTopicArn-${Environment}"

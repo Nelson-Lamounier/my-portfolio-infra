@@ -2,37 +2,240 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: |
-  Reusable CodeBuild IAM Role and Policies Template
+  Ultra-Dynamic CodeBuild IAM Role and Policies Template for Multi-Environment Support
 
-  This template creates a standardized IAM role with the necessary permissions for CodeBuild projects
-  to build Docker images, push to ECR, access S3 artifacts, and retrieve sensitive parameters from SSM.
-
-  Usage: Deploy this as a nested stack from your main pipeline templates to ensure consistent
-  permissions across all CodeBuild projects while maintaining security best practices.
+  This template creates environment-specific IAM roles with dynamic permissions 
+  based on environment configuration, eliminating code duplication while ensuring
+  proper security isolation between dev, staging, and production environments.
 
 Parameters:
-  ArtifactBucket:
+  # Environment Parameter
+  Environment:
+    Type: String
+    Description: Environment name for resource naming and permission isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+  # Projects Configuration as JSON Array
+  ProjectsConfig:
     Description: |
-      S3 bucket name where CodePipeline stores build artifacts and intermediate files.
-      This bucket is shared across all pipeline stages for artifact passing.
+      JSON array of project configurations for dynamic role creation. Format:
+      [
+        {
+          "name": "Portfolio",
+          "ecrRepositories": ["portfolio-app"],
+          "enabled": true
+        },
+        {
+          "name": "Project1", 
+          "ecrRepositories": ["project1-app"],
+          "enabled": true
+        }
+      ]
+    Type: String
+    Default: |
+      [
+        {
+          "name": "Portfolio",
+          "ecrRepositories": ["portfolio-app"],
+          "enabled": true
+        }
+      ]
+
+  # Infrastructure Configuration
+  ArtifactBucket:
+    Description: S3 bucket name for storing build artifacts (will be environment-specific)
     Type: String
 
-  ProjectName:
-    Description: |
-      Unique identifier for the project (e.g., 'Portfolio', 'Project1', 'Project2').
-      Used to create unique role names and avoid conflicts when deploying multiple pipelines.
-      Should match the naming convention used in your service stacks.
+  # KMS Configuration
+  KMSKeyArn:
+    Description: KMS key ARN for encrypting artifacts and parameters
     Type: String
+    Default: ""
+
+Conditions:
+  # Environment-specific conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsStaging: !Equals [!Ref Environment, "staging"]
+  IsDevelopment: !Equals [!Ref Environment, "dev"]
+  
+  # Feature conditions
+  HasKMSKey: !Not [!Equals [!Ref KMSKeyArn, ""]]
+
+Transform: AWS::LanguageExtensions
 
 Resources:
-  CodeBuildRole:
+  # Enhanced CodeBuild Roles with better security
+  Fn::ForEach::CodeBuildRoles:
+    - ProjectConfig
+    - !Ref ProjectsConfig
+    - ${ProjectConfig.name}CodeBuildRole:
+        Type: AWS::IAM::Role
+        Condition: !Equals
+          - !Ref ${ProjectConfig.enabled}
+          - true
+        Properties:
+          RoleName: !Sub "${ProjectConfig.name}-CodeBuildRole-${Environment}"
+          Path: !Sub "/${Environment}/"
+          Description: !Sub "CodeBuild IAM role for ${ProjectConfig.name} in ${Environment} environment"
+          
+          # Enhanced trust policy with conditions
+          AssumeRolePolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service: codebuild.amazonaws.com
+                Action: sts:AssumeRole
+                Condition:
+                  StringEquals:
+                    "aws:RequestedRegion": !Ref AWS::Region
+                  StringLike:
+                    "aws:userid": !Sub "${AWS::AccountId}:*"
+
+          # More restrictive managed policies
+          ManagedPolicyArns:
+            - !If
+              - IsProduction
+              - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+              - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+          Policies:
+            # Enhanced S3 Access Policy with better scoping
+            - PolicyName: !Sub "S3AccessPolicy-${Environment}"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                      - s3:PutObject
+                      - s3:ListBucket
+                    Resource:
+                      - !Sub "arn:aws:s3:::${ArtifactBucket}-${Environment}"
+                      - !Sub "arn:aws:s3:::${ArtifactBucket}-${Environment}/*"
+                    Condition:
+                      StringEquals:
+                        "s3:ExistingObjectTag/Environment": !Ref Environment
+                  
+                  # Separate statement for delete operations (production only)
+                  - !If
+                    - IsProduction
+                    - Effect: Allow
+                      Action:
+                        - s3:DeleteObject
+                      Resource: !Sub "arn:aws:s3:::${ArtifactBucket}-${Environment}/*"
+                      Condition:
+                        StringEquals:
+                          "s3:ExistingObjectTag/CanDelete": "true"
+                    - Effect: Allow
+                      Action:
+                        - s3:DeleteObject
+                      Resource: !Sub "arn:aws:s3:::${ArtifactBucket}-${Environment}/*"
+
+            # Enhanced ECR Access Policy with specific repository access
+            - PolicyName: !Sub "ECRAccessPolicy-${Environment}"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  # Repository-specific permissions
+                  - Effect: Allow
+                    Action:
+                      - ecr:BatchCheckLayerAvailability
+                      - ecr:GetDownloadUrlForLayer
+                      - ecr:BatchGetImage
+                      - ecr:PutImage
+                      - ecr:InitiateLayerUpload
+                      - ecr:UploadLayerPart
+                      - ecr:CompleteLayerUpload
+                    Resource:
+                      Fn::ForEach::ECRResources:
+                        - EcrRepo
+                        - !Ref ${ProjectConfig.ecrRepositories}
+                        - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${EcrRepo}-${Environment}"
+                  
+                  # Global ECR token access (required)
+                  - Effect: Allow
+                    Action:
+                      - ecr:GetAuthorizationToken
+                    Resource: "*"
+
+            # Enhanced CloudWatch Logs Policy with specific log groups
+            - PolicyName: !Sub "LoggingPolicy-${Environment}"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - logs:CreateLogGroup
+                      - logs:CreateLogStream
+                      - logs:PutLogEvents
+                    Resource:
+                      - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectConfig.name}-${Environment}-*"
+                      - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectConfig.name}-${Environment}-*:*"
+
+            # Enhanced SSM Parameter Policy with path-based access
+            - PolicyName: !Sub "SSMParameterPolicy-${Environment}"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - ssm:GetParameter
+                      - ssm:GetParameters
+                      - ssm:GetParametersByPath
+                    Resource:
+                      # Environment-specific parameters
+                      - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Environment}/*"
+                      # Project-specific parameters
+                      - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Environment}/${ProjectConfig.name}/*"
+                  
+                  # KMS access for SecureString parameters
+                  - !If
+                    - HasKMSKey
+                    - Effect: Allow
+                      Action:
+                        - kms:Decrypt
+                        - kms:DescribeKey
+                      Resource: !Ref KMSKeyArn
+                      Condition:
+                        StringEquals:
+                          "kms:ViaService": !Sub "ssm.${AWS::Region}.amazonaws.com"
+                    - !Ref AWS::NoValue
+
+            # Enhanced ECS Update Policy with specific service access
+            - PolicyName: !Sub "ECSUpdatePolicy-${Environment}"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - ecs:UpdateService
+                      - ecs:DescribeServices
+                      - ecs:DescribeTasks
+                      - ecs:DescribeTaskDefinition
+                    Resource:
+                      - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${Environment}-${ProjectConfig.name}-*"
+                      - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${Environment}-${ProjectConfig.name}-*"
+
+          Tags:
+            - Key: Name
+              Value: !Sub "${ProjectConfig.name}-CodeBuildRole-${Environment}"
+            - Key: Environment
+              Value: !Ref Environment
+            - Key: Project
+              Value: !Ref ${ProjectConfig.name}
+            - Key: Purpose
+              Value: "CodeBuild IAM Role"
+            - Key: ManagedBy
+              Value: "CloudFormation"
+
+  # Common CodeBuild Service Role (shared across projects in same environment)
+  CommonCodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
-
-      # Create unique role name to prevent conflicts between different project pipelines
-      RoleName: !Sub ${ProjectName}-CodeBuildRole
-
-      # Trust policy: Allow CodeBuild service to assume this role during build execution
+      RoleName: !Sub "Common-CodeBuildRole-${Environment}"
+      Path: !Sub "/${Environment}/"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -40,77 +243,54 @@ Resources:
             Principal:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
-
-      # AWS managed policies for common CodeBuild operations
-      ManagedPolicyArns:
-
-        # Provides full access to ECR for Docker image operations (push/pull/tag)
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
-
-        # Provides CodeBuild service permissions for builds, logs, and VPC operations
-        - arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess
+      
+      # Minimal common permissions
       Policies:
-
-        # S3 Access Policy: Enables CodeBuild to read source code and store build artifacts
-        - PolicyName: S3AccessPolicy
+        - PolicyName: "CommonCodeBuildPolicy"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:GetObject # Download source code and dependencies from S3
-                  - s3:PutObject # Upload build artifacts to S3# Upload build artifacts (like imagedefinitions.json)
-                  - s3:ListBucket # List bucket contents for artifact discovery
-                Resource:
-
-                  # Grant access to the specific artifact bucket and all objects within it
-                  - !Sub arn:aws:s3:::${ArtifactBucket}
-                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
-
-        # CloudWatch Logs Policy: Enables CodeBuild to create and write to log streams
-        - PolicyName: LoggingPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup # Create log groups for build projects
-                  - logs:CreateLogStream # Create individual log streams for each build
-                  - logs:PutLogEvents # Write build logs and error messages
-
-                # Allow access to all CloudWatch logs (CodeBuild manages log group naming)
-                Resource: '*'
-
-        # SSM Parameter Store Policy: Secure access to sensitive configuration values
-        - PolicyName: SSMParameterPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter # Retrieve individual parameter values
-                  - ssm:GetParameters # Retrieve multiple parameters in batch
-                  - kms:Decrypt # Decrypt SecureString parameters encrypted with KMS
-                Resource:
-
-                  # Specific parameters needed for source control and container registry access
-                  # GitHub token: For accessing private repositories during source checkout
-                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
-
-                  # DockerHub credentials: For pulling base images from DockerHub (if needed)
-                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dockerhub/password
-                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dockerhub/username
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/common-${Environment}-*"
+      
+      Tags:
+        - Key: Name
+          Value: !Sub "Common-CodeBuildRole-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
 
 Outputs:
-  CodeBuildRoleArn:
-    Description: |
-      ARN of the created CodeBuild IAM role.
+  # Dynamic Role Outputs
+  Fn::ForEach::RoleOutputs:
+    - ProjectConfig
+    - !Ref ProjectsConfig
+    - ${ProjectConfig.name}CodeBuildRoleArn:
+        Condition: !Equals
+          - !Ref ${ProjectConfig.enabled}
+          - true
+        Description: !Sub "ARN of the ${ProjectConfig.name} CodeBuild IAM role for ${Environment}"
+        Value: !GetAtt ${ProjectConfig.name}CodeBuildRole.Arn
+        Export:
+          Name: !Sub "${ProjectConfig.name}-CodeBuildRoleArn-${Environment}"
 
-      This output is used by pipeline templates to assign the role to CodeBuild projects.
-      The role ARN is exported with a unique name to prevent conflicts between projects.
-    Value: !GetAtt CodeBuildRole.Arn
+  # Common role output
+  CommonCodeBuildRoleArn:
+    Description: "ARN of the common CodeBuild IAM role"
+    Value: !GetAtt CommonCodeBuildRole.Arn
     Export:
+      Name: !Sub "Common-CodeBuildRoleArn-${Environment}"
 
-      # Export with project-specific name for use in other stacks
-      # Format: {ProjectName}-CodeBuildRoleArn (e.g., Portfolio-CodeBuildRoleArn)
-      Name: Portfolio-CodeBuildRoleArn
+  # Environment summary
+  EnvironmentRoleInfo:
+    Description: "Environment-specific CodeBuild role configuration summary"
+    Value: !Sub |
+      Environment: ${Environment}
+      Projects: ${ProjectsConfig}
+      Artifact Bucket: ${ArtifactBucket}-${Environment}
+      KMS Key: ${KMSKeyArn}
+    Export:
+      Name: !Sub "CodeBuildRoleInfo-${Environment}"

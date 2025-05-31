@@ -87,6 +87,12 @@ Parameters:
     Type: Number
     Default: 3
 
+  # Project Name Parameter
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
 Conditions:
   # SSL Conditions
   HasSSLCertificate: !Not
@@ -108,27 +114,26 @@ Transform: AWS::LanguageExtensions
 
 Resources:
 
-  # Load Balancer Security Group
+  # Enhanced Load Balancer Security Group
   LoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      # Include environment in naming
-      GroupName: !Sub "${LoadBalancerName}-SecurityGroup-${Environment}"
+      GroupName: !Sub "${ProjectName}-${LoadBalancerName}-SecurityGroup-${Environment}"
       GroupDescription: !Sub "Security group for ${LoadBalancerName} Application Load Balancer in ${Environment}"
       VpcId: !ImportValue 
-        Fn::Sub: "VPC-${Environment}"
+        Fn::Sub: "${ProjectName}-VPC-${Environment}"
       SecurityGroupIngress:
         # Only allow standard web traffic from internet
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: !Ref LoadBalancerSGCidrIp
-          Description: Allow HTTP traffic from internet
+          Description: "Allow HTTP traffic from internet"
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: !Ref LoadBalancerSGCidrIp
-          Description: Allow HTTPS traffic from internet
+          Description: "Allow HTTPS traffic from internet"
 
       SecurityGroupEgress:
         # Outbound to ECS containers - use CidrIp for VPC range
@@ -136,26 +141,15 @@ Resources:
           FromPort: 32768
           ToPort: 65535
           CidrIp: !ImportValue 
-            Fn::Sub: "VpcCidr-${Environment}"
-          Description: Allow outbound to ECS containers on ephemeral ports
+            Fn::Sub: "${ProjectName}-VpcCidr-${Environment}"
+          Description: "Allow outbound to ECS containers on ephemeral ports"
         # Outbound for health checks on specific application ports
         - IpProtocol: tcp
           FromPort: 3000
           ToPort: 4000
           CidrIp: !ImportValue 
-            Fn::Sub: "VpcCidr-${Environment}"
-          Description: Allow health checks to application services
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: !ImportValue 
-            Fn::Sub: "VpcCidr-${Environment}"
-          Description: Allow health checks to portfolio service
-      Tags:
-        - Key: Name
-          Value: !Sub "${LoadBalancerName}-SecurityGroup-${Environment}"
-        - Key: Environment
-          Value: !Ref Environment
+            Fn::Sub: "${ProjectName}-VpcCidr-${Environment}"
+          Description: "Allow health checks to application services"
 
   # Add ECS Security Group that references ALB Security Group
   ECSSecurityGroup:
@@ -182,24 +176,19 @@ Resources:
           ToPort: 80
           SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
           Description: "Allow health checks from ALB to portfolio"
-      Tags:
-        - Key: Name
-          Value: !Sub "${LoadBalancerName}-ECS-SecurityGroup-${Environment}"
-        - Key: Environment
-          Value: !Ref Environment
 
-  # Application Load Balancer
+  # Enhanced Application Load Balancer
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub "${LoadBalancerName}-${Environment}"
+      Name: !Sub "${ProjectName}-${LoadBalancerName}-${Environment}"
       Type: application
       Scheme: internet-facing
       Subnets:
         - !ImportValue 
-          Fn::Sub: "PublicSubnet1-${Environment}"
+          Fn::Sub: "${ProjectName}-PublicSubnet1-${Environment}"
         - !ImportValue 
-          Fn::Sub: "PublicSubnet2-${Environment}"
+          Fn::Sub: "${ProjectName}-PublicSubnet2-${Environment}"
       SecurityGroups:
         - !Ref LoadBalancerSecurityGroup
       LoadBalancerAttributes:
@@ -212,11 +201,9 @@ Resources:
           Value: !If [IsProduction, "true", "false"]  # Protect production ALB
         - Key: access_logs.s3.enabled
           Value: !If [IsProduction, "true", "false"]  # Enable access logs in production
-      Tags:
-        - Key: Name
-          Value: !Sub "${LoadBalancerName}-${Environment}"
-        - Key: Environment
-          Value: !Ref Environment
+        # Add WAF for production
+        - Key: waf.fail_open.enabled
+          Value: !If [IsProduction, "false", "true"]
 
   # HTTP Listener
   HTTPListener:
@@ -257,8 +244,8 @@ Resources:
       LoadBalancerArn: !Ref ApplicationLoadBalancer
       Port: 443
       Protocol: HTTPS
-      Certificates:
-        - CertificateArn: !Ref SSLCertificateArn
+      Certificates: !ImportValue 
+            Fn::Sub: "SSLCertificateArn-${Environment}"
       SslPolicy: ELBSecurityPolicy-TLS-1-2-2017-01
       DefaultActions:
         - Type: fixed-response
@@ -273,41 +260,35 @@ Resources:
               </html>
     Condition: EnableHTTPSListener
 
-  # Dynamic Target Groups using Transform
+  # Enhanced Target Groups with better health checks
   Fn::ForEach::TargetGroups:
     - ServiceConfig
     - !Ref ServicesConfig
     - ${ServiceConfig.name}TargetGroup:
         Type: AWS::ElasticLoadBalancingV2::TargetGroup
-        Condition: !Equals
-          - !Ref ${ServiceConfig.enabled}
-          - true
         Properties:
           # Include environment in target group naming
-          Name: !Sub "${ServiceConfig.name}-tg-${Environment}"
+          Name: !Sub "${ProjectName}-${ServiceConfig.name}-tg-${Environment}"
           Port: !Ref ${ServiceConfig.port}
           Protocol: HTTP
           VpcId: !ImportValue 
-            Fn::Sub: "VPC-${Environment}"
+            Fn::Sub: "${ProjectName}-VPC-${Environment}"
           TargetType: instance
-          HealthCheckPort: traffic-port
           HealthCheckEnabled: true
-          HealthCheckPath: !Ref HealthCheckPath
+          HealthCheckPath: !Sub "/${ServiceConfig.name}/health"  # Service-specific health check
           # Environment-specific health check settings
-          HealthCheckIntervalSeconds: !If [IsProduction, 30, !Ref HealthCheckIntervalSeconds]
-          HealthyThresholdCount: !If [IsProduction, 3, !Ref HealthyThresholdCount]
-          UnhealthyThresholdCount: !If [IsProduction, 2, !Ref UnhealthyThresholdCount]
+          HealthCheckIntervalSeconds: !If [IsProduction, 30, 60]
+          HealthyThresholdCount: !If [IsProduction, 3, 2]
+          UnhealthyThresholdCount: !If [IsProduction, 2, 3]
           HealthCheckTimeoutSeconds: 5
           HealthCheckProtocol: HTTP
           Matcher:
-            HttpCode: 200,302
-          Tags:
-            - Key: Name
-              Value: !Sub ${ServiceConfig.name} Target Group
-            - Key: Service
-              Value: !Ref ${ServiceConfig.name}
-            - Key: Environment
-              Value: !Ref Environment
+            HttpCode: "200,302"
+          TargetGroupAttributes:
+            - Key: deregistration_delay.timeout_seconds
+              Value: !If [IsProduction, "300", "30"]
+            - Key: slow_start.duration_seconds
+              Value: !If [IsProduction, "30", "0"]
 
   # Dynamic Listener Rules using Transform
   Fn::ForEach::ListenerRules:

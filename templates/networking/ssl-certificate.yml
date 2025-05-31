@@ -1,66 +1,179 @@
 # @format
 AWSTemplateFormatVersion: "2010-09-09"
 
-Description: ACM Certificate for portfolio domain
+Description: |
+  Dynamic SSL Certificate Template for Portfolio Infrastructure
+  
+  Environment-aware SSL certificate with dynamic domain support
+  using CloudFormation transforms for zero code duplication.
 
 Parameters:
-  RootDomainName:
-    Description: The apex/root domain
+  # Environment Parameter
+  Environment:
     Type: String
+    Description: Environment name for resource naming and certificate isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
 
-  WWWDomainName:
-    Description: The www subdomain
-    Type: String
-
-  Project1DomainName:
-    Description: The project1 subdomain (e.g. project1.lamounierdigital.com)
-    Type: String
-
-  Project2DomainName:
-    Description: The project2 subdomain (e.g. project2.lamounierdigital.com)
-    Type: String
-
-  ProjectFEDomainName:
-    Description: The project3 subdomain (e.g. project3.lamounierdigital.com)
-    Type: String
-
-  ProjectBEDomainName:
-    Description: The project3-Backend subdomain (e.g. api.lamounierdigital.com)
-    Type: String
-
+  # Route 53 Configuration
   HostedZoneId:
-    Description: The Route 53 hosted zone ID for your domain
+    Description: Route 53 Hosted Zone ID for DNS validation
     Type: String
+
+  # Project Name
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  # Primary Domain
+  PrimaryDomainName:
+    Description: Primary domain name for the certificate
+    Type: String
+    Default: "lamounierdigital.com"
+    AllowedPattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$
+    ConstraintDescription: Must be a valid domain name
+
+  # Dynamic Domain Configuration as JSON Array
+  DomainsConfig:
+    Description: |
+      JSON array of additional domain configurations. Format:
+      [
+        {
+          "name": "www",
+          "domain": "www.lamounierdigital.com",
+          "enabled": true
+        },
+        {
+          "name": "project1",
+          "domain": "project1.lamounierdigital.com",
+          "enabled": true
+        }
+      ]
+    Type: String
+    Default: |
+      [
+        {
+          "name": "www",
+          "domain": "www.example.com",
+          "enabled": true
+        }
+      ]
+
+  # Environment-Specific Domain Prefix
+  EnvironmentDomainPrefix:
+    Description: Optional prefix for environment-specific domains
+    Type: String
+    Default: ""
+
+Conditions:
+  # Environment-specific conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  
+  # Domain prefix conditions
+  HasEnvironmentPrefix: !Not
+    - !Equals
+      - !Ref EnvironmentDomainPrefix
+      - ""
+
+Transform: AWS::LanguageExtensions
 
 Resources:
+  # Enhanced SSL Certificate with better security
   SSLCertificate:
     Type: AWS::CertificateManager::Certificate
     Properties:
-      DomainName: !Ref RootDomainName
+      # Primary domain with optional environment prefix
+      DomainName: !If
+        - HasEnvironmentPrefix
+        - !Sub "${EnvironmentDomainPrefix}${PrimaryDomainName}"
+        - !Ref PrimaryDomainName
+      
+      # Dynamic Subject Alternative Names
       SubjectAlternativeNames:
-        - !Ref WWWDomainName
-        - !Ref Project1DomainName
-        - !Ref Project2DomainName
-        - !Ref ProjectFEDomainName
-        - !Ref ProjectBEDomainName
+        Fn::ForEach::SANDomains:
+          - DomainConfig
+          - !Ref DomainsConfig
+          - !If
+            - !Equals
+              - !Ref ${DomainConfig.enabled}
+              - true
+            - !If
+              - HasEnvironmentPrefix
+              - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+              - !Ref ${DomainConfig.domain}
+            - !Ref AWS::NoValue
+      
       ValidationMethod: DNS
+      
+      # Dynamic Domain Validation Options
       DomainValidationOptions:
-        - DomainName: !Ref RootDomainName
+        # Primary domain validation
+        - DomainName: !If
+            - HasEnvironmentPrefix
+            - !Sub "${EnvironmentDomainPrefix}${PrimaryDomainName}"
+            - !Ref PrimaryDomainName
           HostedZoneId: !Ref HostedZoneId
-        - DomainName: !Ref WWWDomainName
-          HostedZoneId: !Ref HostedZoneId
-        - DomainName: !Ref Project1DomainName
-          HostedZoneId: !Ref HostedZoneId
-        - DomainName: !Ref Project2DomainName
-          HostedZoneId: !Ref HostedZoneId
-        - DomainName: !Ref ProjectFEDomainName
-          HostedZoneId: !Ref HostedZoneId
-        - DomainName: !Ref ProjectBEDomainName
-          HostedZoneId: !Ref HostedZoneId
+        
+        # Additional domain validations using Transform
+        - Fn::ForEach::ValidationOptions:
+            - DomainConfig
+            - !Ref DomainsConfig
+            - !If
+              - !Equals
+                - !Ref ${DomainConfig.enabled}
+                - true
+              - DomainName: !If
+                  - HasEnvironmentPrefix
+                  - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+                  - !Ref ${DomainConfig.domain}
+                HostedZoneId: !Ref HostedZoneId
+              - !Ref AWS::NoValue
+      
+      # Always enable certificate transparency logging for security
+      CertificateTransparencyLoggingPreference: ENABLED
+      
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${Environment}-ssl-certificate"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: "Portfolio Infrastructure SSL Certificate"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: "CloudFormation"
 
 Outputs:
+  # Environment-specific SSL certificate outputs
   SSLCertificateArn:
     Description: The ARN of the ACM certificate
     Value: !Ref SSLCertificate
     Export:
-      Name: SSLCertificateArn
+      Name: !Sub "${ProjectName}-SSLCertificateArn-${Environment}"
+
+  SSLCertificateDomainName:
+    Description: Primary domain name of the SSL certificate
+    Value: !If
+      - HasEnvironmentPrefix
+      - !Sub "${EnvironmentDomainPrefix}${PrimaryDomainName}"
+      - !Ref PrimaryDomainName
+    Export:
+      Name: !Sub "${ProjectName}-SSLCertificateDomainName-${Environment}"
+
+  # Dynamic domain outputs
+  Fn::ForEach::DomainOutputs:
+    - DomainConfig
+    - !Ref DomainsConfig
+    - ${DomainConfig.name}DomainSSL:
+        Condition: !Equals
+          - !Ref ${DomainConfig.enabled}
+          - true
+        Description: !Sub "SSL-enabled domain for ${DomainConfig.name}"
+        Value: !If
+          - HasEnvironmentPrefix
+          - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+          - !Ref ${DomainConfig.domain}
+        Export:
+          Name: !Sub "${DomainConfig.name}DomainSSL-${Environment}"

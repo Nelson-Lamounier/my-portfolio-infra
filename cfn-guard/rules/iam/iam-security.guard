@@ -1,0 +1,201 @@
+# Dedicated IAM Security Rules
+
+# Advanced IAM Role Security Configuration
+rule iam_trust_policy_condition_enforcement {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.AssumeRolePolicyDocument.Statement[*] {
+            when Principal.Service == "codebuild.amazonaws.com" {
+                Condition exists << CodeBuild roles should have conditions in trust policy >>
+                Condition.StringEquals exists << Use StringEquals conditions >>
+                when Condition.StringEquals."aws:RequestedRegion" exists {
+                    Condition.StringEquals."aws:RequestedRegion" == "${AWS::Region}" << Restrict to current region >>
+                }
+            }
+        }
+    }
+}
+
+rule iam_policy_action_specificity {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Effect == "Allow" {
+                Action exists << IAM statements must specify actions >>
+                when Action is_list {
+                    Action[*] != "*" << Avoid wildcard actions >>
+                    # Validate specific action patterns
+                    Action[*] == /^[a-z0-9\-]+:[A-Za-z]+/ << Actions should follow service:Action format >>
+                }
+            }
+        }
+    }
+}
+
+rule iam_s3_bucket_policy_security {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /s3:.*/ {
+                Resource exists << S3 actions must specify resources >>
+                when Resource is_list {
+                    Resource[*] {
+                        when this == /.*\*$/ {
+                            # If using wildcards, ensure they're scoped to environment
+                            this == /.*${Environment}.*/ << S3 wildcard resources should be environment-scoped >>
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule iam_ecr_repository_access_control {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /ecr:.*/ and Resource != "*" {
+                Resource == /.*repository\/.*${Environment}/ << ECR repository access should be environment-specific >>
+                # Validate ECR actions are appropriate for CodeBuild
+                Action[*] in ["ecr:GetAuthorizationToken", 
+                             "ecr:BatchCheckLayerAvailability",
+                             "ecr:GetDownloadUrlForLayer", 
+                             "ecr:BatchGetImage",
+                             "ecr:PutImage",
+                             "ecr:InitiateLayerUpload",
+                             "ecr:UploadLayerPart",
+                             "ecr:CompleteLayerUpload"] << Use only necessary ECR actions >>
+            }
+        }
+    }
+}
+
+rule iam_cloudwatch_logs_resource_scoping {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /logs:.*/ {
+                Resource exists << CloudWatch Logs actions must specify resources >>
+                Resource == /.*${Environment}.*/ << Log resources should be environment-specific >>
+            }
+        }
+    }
+}
+
+rule iam_ssm_parameter_access_control {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /ssm:Get.*/ {
+                Resource exists << SSM parameter actions must specify resources >>
+                when Resource is_list {
+                    Resource[*] == /.*parameter\/.*/ << SSM resources should be parameter ARNs >>
+                    # Ensure environment isolation
+                    some Resource[*] == /.*\/${Environment}\/.*/ << Should access environment-specific parameters >>
+                }
+            }
+        }
+    }
+}
+
+rule iam_kms_key_usage_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /kms:.*/ {
+                Action[*] in ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey"] << Limit KMS actions to necessary operations >>
+                Resource exists << KMS actions must specify key ARNs >>
+                Resource != "*" << KMS resources should not use wildcards >>
+            }
+        }
+    }
+}
+
+rule iam_ecs_deployment_permissions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /ecs:.*/ {
+                Resource exists << ECS actions must specify resources >>
+                when Resource is_list {
+                    Resource[*] == /.*\/${Environment}-.*/ << ECS resources should be environment-specific >>
+                }
+                # Limit ECS actions to deployment needs
+                Action[*] in ["ecs:UpdateService", 
+                             "ecs:DescribeServices", 
+                             "ecs:DescribeTasks",
+                             "ecs:DescribeTaskDefinition"] << Limit ECS actions to deployment needs >>
+            }
+        }
+    }
+}
+
+# Cross-Environment Access Prevention
+rule iam_prevent_cross_environment_access {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Resource is_list {
+                Resource[*] {
+                    when this == /.*-(dev|staging|production).*/ {
+                        this == /.*${Environment}.*/ << Resources should only access same environment >>
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Policy Size and Complexity Management
+rule iam_policy_document_size_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*] {
+            PolicyName != "" << Policy name cannot be empty >>
+            PolicyDocument.Version == "2012-10-17" << Use current policy language version >>
+            PolicyDocument.Statement exists << Policy must have statements >>
+            when PolicyDocument.Statement is_list {
+                length(PolicyDocument.Statement) >= 1 << Policy must have at least one statement >>
+            }
+        }
+    }
+}
+
+# Production-Specific Security Requirements
+rule iam_production_audit_capabilities {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /cloudtrail:.*/ {
+                    Action[*] == "cloudtrail:LookupEvents" << Production roles should only have read access to CloudTrail >>
+                }
+            }
+        }
+    }
+}
+
+rule iam_sensitive_action_restrictions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            Action[*] != "iam:*" << CodeBuild roles should not have IAM permissions >>
+            Action[*] != "sts:AssumeRole" << Prevent role chaining in CodeBuild roles >>
+            Action[*] != /.*:Delete.*/ << Limit delete permissions >>
+        }
+    }
+}
+
+# Additional CodePipeline IAM Security Rules
+rule codepipeline_role_session_duration {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties {
+                when MaxSessionDuration exists {
+                    MaxSessionDuration <= 43200 << CodePipeline role session duration should not exceed 12 hours >>
+                    MaxSessionDuration >= 3600 << CodePipeline role session duration should be at least 1 hour >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_role_boundary_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ and Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties {
+                PermissionsBoundary exists << Production CodePipeline roles should have permissions boundary >>
+                PermissionsBoundary == /arn:aws:iam::.*:policy\/.*/ << Permissions boundary should be valid policy ARN >>
+            }
+        }
+    }
+}

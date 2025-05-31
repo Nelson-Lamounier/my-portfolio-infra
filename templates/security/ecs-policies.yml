@@ -1,21 +1,102 @@
 # @format
----
 AWSTemplateFormatVersion: "2010-09-09"
-Description: IAM roles and policies for ECS services
+
+Description: |
+  Ultra-Dynamic ECS IAM Roles and Policies Template for Multi-Environment Support
+
+  This template creates environment-specific IAM roles with dynamic permissions 
+  based on environment configuration, eliminating code duplication while ensuring
+  proper security isolation between dev, staging, and production environments.
 
 Parameters:
+  # Environment Parameter - Core for all resource naming
   Environment:
     Type: String
     Description: Environment name for resource naming and isolation
     Default: "dev"
     AllowedValues: ["dev", "staging", "production"]
 
+  # Project Configuration
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  # KMS Configuration
+  KMSKeyArn:
+    Type: String
+    Description: KMS key ARN for encrypting logs and secrets
+    Default: ""
+
+  # VPC Configuration (for VPC endpoint access)
+  VPCId:
+    Type: String
+    Description: VPC ID where ECS tasks will run
+    Default: ""
+
+  # Custom Log Group Prefix
+  LogGroupPrefix:
+    Type: String
+    Description: Custom prefix for log groups
+    Default: "/ecs"
+
+Mappings:
+  # Environment-specific configurations
+  EnvironmentMap:
+    dev:
+      LogRetentionDays: 7
+      EnableDetailedMonitoring: false
+      AllowCrossAccountAccess: false
+      EnableXRayTracing: false
+    staging:
+      LogRetentionDays: 14
+      EnableDetailedMonitoring: true
+      AllowCrossAccountAccess: false
+      EnableXRayTracing: true
+    production:
+      LogRetentionDays: 90
+      EnableDetailedMonitoring: true
+      AllowCrossAccountAccess: true
+      EnableXRayTracing: true
+
+  # Permission boundaries per environment
+  PermissionMap:
+    dev:
+      AllowedRegions: ["*"]
+      ResourceScope: "broad"
+      AuditLevel: "basic"
+    staging:
+      AllowedRegions: ["eu-west-1", "us-east-1"]
+      ResourceScope: "restricted"
+      AuditLevel: "enhanced"
+    production:
+      AllowedRegions: ["eu-west-1"]
+      ResourceScope: "minimal"
+      AuditLevel: "full"
+
+Conditions:
+  # Environment-specific conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsStaging: !Equals [!Ref Environment, "staging"]
+  IsDevelopment: !Equals [!Ref Environment, "dev"]
+  
+  # Feature conditions
+  HasKMSKey: !Not [!Equals [!Ref KMSKeyArn, ""]]
+  HasVPC: !Not [!Equals [!Ref VPCId, ""]]
+  EnableDetailedMonitoring: !FindInMap [EnvironmentMap, !Ref Environment, EnableDetailedMonitoring]
+  EnableXRayTracing: !FindInMap [EnvironmentMap, !Ref Environment, EnableXRayTracing]
+  AllowCrossAccount: !FindInMap [EnvironmentMap, !Ref Environment, AllowCrossAccountAccess]
+
 Resources:
-  # ECS Task Execution Role (used by ECS agent)
+  # Enhanced Task Execution Role with better security
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "ECS-TaskExecutionRole-${Environment}"
+      # Dynamic role naming with environment isolation
+      RoleName: !Sub "${ProjectName}-ECS-TaskExecutionRole-${Environment}"
+      Path: !Sub "/${Environment}/"
+      
+      # Enhanced trust policy with stricter conditions
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -23,10 +104,34 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:RequestedRegion": !FindInMap [PermissionMap, !Ref Environment, AllowedRegions]
+          # More restrictive cross-account access for production
+          - !If
+            - AllowCrossAccount
+            - Effect: Allow
+              Principal:
+                AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+              Action: sts:AssumeRole
+              Condition:
+                StringEquals:
+                  "sts:ExternalId": !Sub "${ProjectName}-${Environment}"
+                IpAddress:
+                  "aws:SourceIp": "10.0.0.0/8"  # Restrict to private networks
+            - !Ref AWS::NoValue
+
+      # Environment-appropriate managed policies
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - !If
+          - EnableXRayTracing
+          - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+          - !Ref AWS::NoValue
+
       Policies:
-        - PolicyName: !Sub "ECS-TaskExecutionPolicy-${Environment}"
+        # Enhanced CloudWatch Logs Policy with better scoping
+        - PolicyName: !Sub "CloudWatchLogs-${Environment}"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -37,27 +142,110 @@ Resources:
                   - logs:DescribeLogGroups
                   - logs:DescribeLogStreams
                   - logs:PutLogEvents
+                  - logs:PutRetentionPolicy
                 Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${Environment}/*"
+                  # More specific environment-scoped log groups
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupPrefix}/${Environment}/*"
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${Environment}/*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/containerinsights/${Environment}-*"
+
+        # Enhanced ECR Access Policy with better repository scoping
+        - PolicyName: !Sub "ECRAccess-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
               - Effect: Allow
                 Action:
                   - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - ecr:BatchCheckLayerAvailability
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
-                Resource: "*"
+                Resource:
+                  # More specific environment-scoped ECR repositories
+                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}-*-${Environment}"
+                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${Environment}-*"
+
+        # Enhanced SSM Parameter Access with better path restrictions
+        - PolicyName: !Sub "SSMParameterAccess-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  # Environment-specific parameters
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Environment}/*"
+                  # More restricted global parameters
+                  - !If
+                    - IsProduction
+                    - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/global/production/*"
+                    - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/global/shared/*"
+
+        # Enhanced KMS Access Policy with service conditions
+        - !If
+          - HasKMSKey
+          - PolicyName: !Sub "KMSAccess-${Environment}"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:DescribeKey
+                    - kms:GenerateDataKey
+                  Resource: !Ref KMSKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": 
+                        - !Sub "logs.${AWS::Region}.amazonaws.com"
+                        - !Sub "ssm.${AWS::Region}.amazonaws.com"
+          - !Ref AWS::NoValue
+
+        # Enhanced Production-specific monitoring with specific resources
+        - !If
+          - IsProduction
+          - PolicyName: "ProductionMonitoring"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - cloudwatch:PutMetricData
+                  Resource: !Sub "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:metric/Custom/ECS/${Environment}/*"
+                - Effect: Allow
+                  Action:
+                    - xray:PutTraceSegments
+                    - xray:PutTelemetryRecords
+                  Resource: "*"
+          - !Ref AWS::NoValue
+
       Tags:
         - Key: Name
-          Value: !Sub "ECS-TaskExecutionRole-${Environment}"
+          Value: !Sub "${ProjectName}-ECS-TaskExecutionRole-${Environment}"
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "ECS Task Execution"
+        - Key: ManagedBy
+          Value: "CloudFormation"
 
-  # ECS Task Role (used by application code)
+  # Environment-specific ECS Task Role (for application code)
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "ECS-TaskRole-${Environment}"
+      # Dynamic role naming with environment isolation
+      RoleName: !Sub "${ProjectName}-ECS-TaskRole-${Environment}"
+      Path: !Sub "/${Environment}/"
+      
+      # Trust policy
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -65,8 +253,13 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:RequestedRegion": !FindInMap [PermissionMap, !Ref Environment, AllowedRegions]
+
       Policies:
-        - PolicyName: !Sub "ECS-TaskPolicy-${Environment}"
+        # Environment-specific Application Logs Policy
+        - PolicyName: !Sub "ApplicationLogs-${Environment}"
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -75,34 +268,158 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${Environment}/*"
+                  # Environment-specific application log groups
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupPrefix}/${Environment}/*"
+
+        # Environment-specific SSM Parameter Access (for app config)
+        - PolicyName: !Sub "ApplicationConfig-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  # Environment-specific application parameters
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${Environment}/app/*"
+
+        # Environment-specific S3 Access (if needed)
+        - PolicyName: !Sub "S3Access-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  # Environment-specific S3 buckets
+                  - !Sub "arn:aws:s3:::${ProjectName}-${Environment}-*/*"
+
+        # Development-specific broader permissions
+        - !If
+          - IsDevelopment
+          - PolicyName: "DevelopmentAccess"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:ListBucket
+                    - cloudwatch:GetMetricStatistics
+                  Resource: "*"
+          - !Ref AWS::NoValue
+
       Tags:
         - Key: Name
-          Value: !Sub "ECS-TaskRole-${Environment}"
+          Value: !Sub "${ProjectName}-ECS-TaskRole-${Environment}"
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "ECS Task Application"
+
+  # Environment-specific ECS Service Role (for ALB integration)
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # Dynamic role naming with environment isolation
+      RoleName: !Sub "${ProjectName}-ECS-ServiceRole-${Environment}"
+      Path: !Sub "/${Environment}/"
+      
+      # Trust policy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action: sts:AssumeRole
+
+      # Managed policy for ECS service
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSServiceRolePolicy
+
+      Policies:
+        # Environment-specific ALB access
+        - PolicyName: !Sub "ALBAccess-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:Describe*
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:RegisterTargets
+                Resource:
+                  # Environment-specific load balancers
+                  - !Sub "arn:aws:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/app/${ProjectName}-${Environment}-*"
+                  - !Sub "arn:aws:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:targetgroup/${ProjectName}-${Environment}-*"
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ECS-ServiceRole-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: "ECS Service"
 
 Outputs:
+  # Environment-specific Task Execution Role outputs
   TaskExecutionRoleArn:
     Description: ARN of the ECS task execution role
     Value: !GetAtt TaskExecutionRole.Arn
     Export:
-      Name: !Sub "TaskExecutionRoleArn-${Environment}"
+      Name: !Sub "${ProjectName}-TaskExecutionRoleArn-${Environment}"
 
   TaskExecutionRoleName:
     Description: Name of the ECS task execution role
     Value: !Ref TaskExecutionRole
     Export:
-      Name: !Sub "TaskExecutionRoleName-${Environment}"
+      Name: !Sub "${ProjectName}-TaskExecutionRoleName-${Environment}"
 
+  # Environment-specific Task Role outputs
   TaskRoleArn:
     Description: ARN of the ECS task role
     Value: !GetAtt TaskRole.Arn
     Export:
-      Name: !Sub "TaskRoleArn-${Environment}"
+      Name: !Sub "${ProjectName}-TaskRoleArn-${Environment}"
 
   TaskRoleName:
     Description: Name of the ECS task role
     Value: !Ref TaskRole
     Export:
-      Name: !Sub "TaskRoleName-${Environment}"
+      Name: !Sub "${ProjectName}-TaskRoleName-${Environment}"
+
+  # Environment-specific Service Role outputs
+  ServiceRoleArn:
+    Description: ARN of the ECS service role
+    Value: !GetAtt ServiceRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ServiceRoleArn-${Environment}"
+
+  ServiceRoleName:
+    Description: Name of the ECS service role
+    Value: !Ref ServiceRole
+    Export:
+      Name: !Sub "${ProjectName}-ServiceRoleName-${Environment}"
+
+  # Environment configuration summary
+  EnvironmentRoleInfo:
+    Description: Environment-specific ECS role configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Project: ${ProjectName}
+      Task Execution Role: ${TaskExecutionRole}
+      Task Role: ${TaskRole}
+      Service Role: ${ServiceRole}
+      Log Retention: ${EnvironmentMap.${Environment}.LogRetentionDays} days
+      X-Ray Tracing: ${EnvironmentMap.${Environment}.EnableXRayTracing}
+    Export:
+      Name: !Sub "ECSRoleInfo-${Environment}"

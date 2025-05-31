@@ -1,0 +1,114 @@
+# Dedicated Load Balancer Security Rules
+
+# Advanced ALB Security Configuration
+rule alb_listener_security_headers {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::ListenerRule" ] {
+        Properties.Actions[*] {
+            when Type == "fixed-response" {
+                FixedResponseConfig exists << Fixed responses must have configuration >>
+                FixedResponseConfig.StatusCode exists << Response status code must be specified >>
+                FixedResponseConfig.ContentType exists << Response content type must be specified >>
+            }
+        }
+    }
+}
+
+rule alb_default_action_security {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::Listener" ] {
+        Properties.DefaultActions[*] {
+            Type in ["fixed-response", "redirect", "forward"] << Default actions must use secure action types >>
+            when Type == "fixed-response" {
+                FixedResponseConfig.StatusCode in ["200", "404", "503"] << Use appropriate status codes >>
+            }
+        }
+    }
+}
+
+rule target_group_protocol_security {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        Properties {
+            Protocol in ["HTTP", "HTTPS"] << Target groups should use HTTP/HTTPS protocols >>
+            Port exists << Target group port must be specified >>
+            Port >= 1 << Port must be valid >>
+            Port <= 65535 << Port must be within valid range >>
+        }
+    }
+}
+
+rule alb_subnet_placement {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        Properties {
+            Subnets exists << ALB must specify subnets >>
+            Subnets not empty << Subnets list cannot be empty >>
+            # Should have at least 2 subnets for high availability
+            length(Subnets) >= 2 << ALB should be deployed across multiple subnets for HA >>
+        }
+    }
+}
+
+rule alb_security_group_assignment {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        Properties {
+            SecurityGroups exists << ALB must have security groups assigned >>
+            SecurityGroups not empty << Security groups list cannot be empty >>
+        }
+    }
+}
+
+# Target Group Advanced Security
+rule target_group_health_check_security {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        Properties {
+            HealthCheckTimeoutSeconds exists << Health check timeout must be specified >>
+            HealthCheckTimeoutSeconds <= 120 << Health check timeout should not exceed 2 minutes >>
+            HealthCheckTimeoutSeconds >= 2 << Health check timeout should be at least 2 seconds >>
+        }
+    }
+}
+
+rule target_group_matcher_configuration {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        Properties.Matcher {
+            HttpCode exists << Health check response codes must be specified >>
+            HttpCode != "" << HTTP codes cannot be empty >>
+            # Allow common successful response codes
+            HttpCode == /^[2-3][0-9][0-9]/ or HttpCode == /.*200.*/ << Use appropriate HTTP response codes >>
+        }
+    }
+}
+
+# Listener Rule Security
+rule listener_rule_priority_unique {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::ListenerRule" ] {
+        Properties {
+            Priority exists << Listener rules must have priority >>
+            Priority >= 1 << Priority must be at least 1 >>
+            Priority <= 50000 << Priority must be within valid range >>
+        }
+    }
+}
+
+rule listener_rule_conditions_specific {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::ListenerRule" ] {
+        Properties.Conditions[*] {
+            Field exists << Condition field must be specified >>
+            Field in ["host-header", "path-pattern", "http-header", "query-string", "source-ip"] << Use valid condition fields >>
+            Values exists << Condition values must be specified >>
+            Values not empty << Values list cannot be empty >>
+        }
+    }
+}
+
+# Security Group Chain Validation
+rule alb_to_ecs_security_group_chain {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.GroupName == /.*ECS.*/ {
+            Properties.SecurityGroupIngress[*] {
+                when SourceSecurityGroupId exists {
+                    Description exists << Security group references must have descriptions >>
+                    Description == /.*ALB.*/ or Description == /.*load.*balancer.*/i << ECS security groups should reference ALB >>
+                }
+            }
+        }
+    }
+}

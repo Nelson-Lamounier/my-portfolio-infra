@@ -1,0 +1,852 @@
+# Auto Scaling Cost Optimization Rules
+rule asg_has_reasonable_max_size {
+    Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ] {
+        Properties {
+            MaxSize <= 10 << Maximum size should not exceed 10 instances for cost control >>
+        }
+    }
+}
+
+rule asg_min_size_appropriate_for_environment {
+    Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties {
+                MinSize <= 1 << Development environment should have minimal instances >>
+            }
+        }
+        when Properties.Tags.*[Key == "Environment" && Value == "staging"] exists {
+            Properties {
+                MinSize <= 1 << Staging environment should have minimal instances >>
+            }
+        }
+    }
+}
+
+rule asg_has_cooldown_period {
+    Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ] {
+        Properties {
+            DefaultCooldown exists
+            DefaultCooldown >= 300 << Cooldown period should be at least 5 minutes to prevent rapid scaling >>
+        }
+    }
+}
+
+rule scaling_policy_has_cooldown {
+    Resources.*[ Type == "AWS::AutoScaling::ScalingPolicy" ] {
+        Properties {
+            Cooldown exists
+            Cooldown >= 300 << Scaling policies should have appropriate cooldown periods >>
+        }
+    }
+}
+
+rule prefer_target_tracking_over_simple_scaling {
+    Resources.*[ Type == "AWS::AutoScaling::ScalingPolicy" ] {
+        Properties {
+            PolicyType == "TargetTrackingScaling" or 
+            PolicyType == "StepScaling" << Prefer target tracking or step scaling over simple scaling for better cost control >>
+        }
+    }
+}
+
+# ECS Cost Optimization Rules
+rule ecs_cluster_uses_ec2_capacity_provider_for_cost {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        Properties.CapacityProviders[*] {
+            some == "EC2" << ECS Cluster should use EC2 capacity provider for cost efficiency >>
+        }
+    }
+}
+
+rule ecs_cluster_capacity_strategy_has_appropriate_weights {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        Properties.DefaultCapacityProviderStrategy[*] {
+            Weight exists << Capacity provider strategy must specify weights >>
+            Weight >= 1 << Capacity provider weight must be at least 1 >>
+        }
+    }
+}
+
+rule ecs_cluster_container_insights_disabled_for_dev {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.ClusterSettings.*[Name == "containerInsights"] {
+                Value == "disabled" << Container Insights should be disabled in dev environment for cost savings >>
+            }
+        }
+    }
+}
+
+rule ecs_cluster_container_insights_enabled_for_production {
+    Resources.*[ Type == "AWS::ECS::Cluster" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.ClusterSettings.*[Name == "containerInsights"] {
+                Value == "enabled" << Container Insights must be enabled in production for monitoring >>
+            }
+        }
+    }
+}
+
+rule ecs_service_appropriate_desired_count {
+    Resources.*[ Type == "AWS::ECS::Service" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties {
+                DesiredCount <= 2 << Development environment should have minimal service instances >>
+            }
+        }
+        when Properties.Tags.*[Key == "Environment" && Value == "staging"] exists {
+            Properties {
+                DesiredCount <= 3 << Staging environment should have limited service instances >>
+            }
+        }
+    }
+}
+
+rule ecs_task_definition_appropriate_cpu_memory {
+    Resources.*[ Type == "AWS::ECS::TaskDefinition" ] {
+        Properties {
+            when Cpu exists {
+                Cpu in [256, 512, 1024, 2048, 4096] << CPU should use standard values for cost efficiency >>
+            }
+            when Memory exists {
+                Memory in [512, 1024, 2048, 3072, 4096, 5120, 6144, 7168, 8192] << Memory should use standard values >>
+            }
+        }
+    }
+}
+
+rule ecs_containers_appropriate_resource_allocation {
+    Resources.*[ Type == "AWS::ECS::TaskDefinition" ] {
+        Properties.ContainerDefinitions[*] {
+            when MemoryReservation exists {
+                MemoryReservation >= 128 << Container memory reservation should be at least 128 MB >>
+                MemoryReservation <= 8192 << Container memory reservation should not exceed 8 GB for cost control >>
+            }
+            when Cpu exists {
+                Cpu >= 128 << Container CPU should be at least 128 units >>
+                Cpu <= 4096 << Container CPU should not exceed 4096 units for cost control >>
+            }
+        }
+    }
+}
+
+rule ecs_service_efficient_deployment_strategy {
+    Resources.*[ Type == "AWS::ECS::Service" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.DeploymentConfiguration {
+                MaximumPercent <= 200 << Development should use efficient deployment strategy >>
+                MinimumHealthyPercent >= 0 << Development can use aggressive replacement strategy >>
+            }
+        }
+    }
+}
+
+rule ecs_log_groups_appropriate_retention {
+    Resources.*[ Type == "AWS::Logs::LogGroup" ] {
+        Properties {
+            RetentionInDays exists << Log groups must have retention policy >>
+            RetentionInDays <= 90 << Log retention should not exceed 90 days for cost control >>
+        }
+    }
+}
+
+# Launch Template Cost Optimization Rules
+rule launch_template_uses_appropriate_instance_types {
+    Resources.*[ Type == "AWS::EC2::LaunchTemplate" ] {
+        Properties.LaunchTemplateData {
+            InstanceType exists << Instance type must be specified >>
+            # Recommend cost-effective instance types for different workloads
+            InstanceType in ["t3.micro", "t3.small", "t3.medium", "t3.large", "t3.xlarge", 
+                           "t3a.micro", "t3a.small", "t3a.medium", "t3a.large", 
+                           "m5.large", "m5.xlarge", "c5.large", "c5.xlarge"] << Use cost-effective instance types >>
+        }
+    }
+}
+
+rule launch_template_appropriate_storage {
+    Resources.*[ Type == "AWS::EC2::LaunchTemplate" ] {
+        Properties.LaunchTemplateData {
+            when BlockDeviceMappings exists {
+                BlockDeviceMappings[*] {
+                    when Ebs exists {
+                        Ebs.VolumeSize <= 100 << EBS volume size should be reasonable for cost control >>
+                        Ebs.VolumeType in ["gp3", "gp2"] << Use cost-effective EBS volume types >>
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule launch_template_ebs_volume_optimization {
+    Resources.*[ Type == "AWS::EC2::LaunchTemplate" ] {
+        Properties.LaunchTemplateData.BlockDeviceMappings[*] {
+            when Ebs.VolumeType == "gp3" {
+                Ebs {
+                    # Only specify IOPS if needed for cost optimization
+                    when Iops exists {
+                        Iops <= 16000 << GP3 IOPS should be reasonable for cost control >>
+                    }
+                    when Throughput exists {
+                        Throughput <= 1000 << GP3 throughput should be reasonable for cost control >>
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule launch_template_detailed_monitoring_environment_appropriate {
+    Resources.*[ Type == "AWS::EC2::LaunchTemplate" ] {
+        when Properties.LaunchTemplateData.TagSpecifications[*].Tags[*].Key == "Environment" and 
+             Properties.LaunchTemplateData.TagSpecifications[*].Tags[*].Value == "dev" {
+            Properties.LaunchTemplateData {
+                Monitoring not exists or Monitoring.Enabled == false << Development instances should not use detailed monitoring for cost savings >>
+            }
+        }
+    }
+}
+
+# VPC Cost Optimization Rules
+rule flow_logs_appropriate_retention {
+    Resources.*[ Type == "AWS::Logs::LogGroup" ] {
+        when Properties.LogGroupName == /.*flowlogs.*/ {
+            Properties {
+                RetentionInDays exists << Flow log groups must have retention policy >>
+                RetentionInDays <= 90 << Flow log retention should not exceed 90 days for cost control >>
+                RetentionInDays >= 7 << Flow log retention should be at least 7 days for debugging >>
+            }
+        }
+    }
+}
+
+rule flow_logs_environment_appropriate_retention {
+    Resources.*[ Type == "AWS::Logs::LogGroup" ] {
+        when Properties.LogGroupName == /.*flowlogs.*dev.*/ {
+            Properties {
+                RetentionInDays <= 14 << Development flow logs should have short retention for cost savings >>
+            }
+        }
+        when Properties.LogGroupName == /.*flowlogs.*production.*/ {
+            Properties {
+                RetentionInDays >= 30 << Production flow logs should retain data for compliance >>
+            }
+        }
+    }
+}
+
+rule vpc_cidr_appropriate_size {
+    Resources.*[ Type == "AWS::EC2::VPC" ] {
+        Properties {
+            # Check CIDR size is not too large for cost efficiency
+            CidrBlock == /.*\/1[6-9]$/ or 
+            CidrBlock == /.*\/2[0-8]$/ << VPC CIDR should be appropriately sized (/16 to /28) to avoid waste >>
+        }
+    }
+}
+
+rule subnets_appropriate_sizing {
+    Resources.*[ Type == "AWS::EC2::Subnet" ] {
+        Properties {
+            # Ensure subnet sizing is cost-effective
+            CidrBlock == /.*\/2[0-8]$/ << Subnets should use /20 to /28 CIDR blocks for cost efficiency >>
+        }
+    }
+}
+
+rule minimize_nat_gateways {
+    Resources.*[ Type == "AWS::EC2::NatGateway" ] {
+        # Count NAT gateways to avoid excessive costs
+        Properties {
+            AllocationId exists << NAT Gateway must have Elastic IP allocation >>
+            SubnetId exists << NAT Gateway must be in a public subnet >>
+        }
+    }
+}
+
+# Load Balancer Cost Optimization Rules
+rule alb_appropriate_idle_timeout {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        Properties.LoadBalancerAttributes[*] {
+            when Key == "idle_timeout.timeout_seconds" {
+                Value <= "300" << ALB idle timeout should not exceed 5 minutes for cost efficiency >>
+                Value >= "30" << ALB idle timeout should be at least 30 seconds >>
+            }
+        }
+    }
+}
+
+rule alb_environment_specific_features {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.LoadBalancerAttributes[*] {
+                when Key == "deletion_protection.enabled" {
+                    Value == "false" << Development ALBs should not have deletion protection for cost savings >>
+                }
+                when Key == "access_logs.s3.enabled" {
+                    Value == "false" << Development ALBs may disable access logs for cost savings >>
+                }
+            }
+        }
+    }
+}
+
+rule target_group_deregistration_delay {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        Properties {
+            when TargetGroupAttributes exists {
+                TargetGroupAttributes[*] {
+                    when Key == "deregistration_delay.timeout_seconds" {
+                        Value <= "300" << Target group deregistration delay should not exceed 5 minutes >>
+                        Value >= "30" << Target group deregistration delay should be at least 30 seconds >>
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule target_group_health_check_intervals {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::TargetGroup" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties {
+                HealthCheckIntervalSeconds <= 60 << Development health checks can be less frequent for cost savings >>
+                HealthyThresholdCount <= 3 << Development can use relaxed health check thresholds >>
+            }
+        }
+    }
+}
+
+rule alb_scheme_appropriate {
+    Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ] {
+        Properties {
+            Scheme exists << Load balancer scheme must be specified >>
+            Scheme in ["internet-facing", "internal"] << Load balancer scheme must be valid >>
+        }
+    }
+}
+
+# Route 53 Cost Optimization Rules
+rule route53_ttl_cost_optimization {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.TTL exists {
+            Properties {
+                TTL >= 300 << DNS TTL should be at least 5 minutes for cost efficiency >>
+                TTL <= 86400 << DNS TTL should not exceed 24 hours for flexibility >>
+            }
+        }
+    }
+}
+
+rule route53_environment_specific_ttl {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties {
+                when TTL exists {
+                    TTL <= 600 << Development DNS records can use shorter TTL for testing >>
+                }
+            }
+        }
+        when Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties {
+                when TTL exists {
+                    TTL >= 1800 << Production DNS records should use longer TTL for performance >>
+                }
+            }
+        }
+    }
+}
+
+rule route53_health_check_intervals {
+    Resources.*[ Type == "AWS::Route53::HealthCheck" ] {
+        Properties {
+            RequestInterval exists << Health check interval must be specified >>
+            RequestInterval in [10, 30] << Use standard health check intervals (10 or 30 seconds) >>
+            FailureThreshold <= 10 << Failure threshold should be reasonable for cost control >>
+            FailureThreshold >= 1 << Failure threshold must be at least 1 >>
+        }
+    }
+}
+
+rule route53_minimize_health_checks {
+    Resources.*[ Type == "AWS::Route53::HealthCheck" ] {
+        Properties {
+            # Health checks cost $0.50 per month each
+            Type in ["HTTPS", "TCP"] << Use efficient health check types to minimize costs >>
+        }
+    }
+}
+
+rule route53_alias_vs_cname_cost {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.Type == "CNAME" {
+            Properties {
+                # CNAME records are charged, alias records are free for AWS resources
+                ResourceRecords exists << CNAME records should only be used when alias records aren't supported >>
+            }
+        }
+    }
+}
+
+rule route53_weighted_routing_efficiency {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.Weight exists {
+            Properties {
+                SetIdentifier exists << Weighted routing must have set identifier >>
+                Weight >= 0 << Weight must be non-negative >>
+                Weight <= 255 << Weight should be within reasonable range >>
+            }
+        }
+    }
+}
+
+# SSL Certificate Cost Optimization Rules
+rule acm_certificate_consolidation {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            when SubjectAlternativeNames exists {
+                # Use SANs to consolidate multiple domains in one certificate
+                length(SubjectAlternativeNames) <= 10 << Limit SANs to reasonable number for management >>
+            }
+        }
+    }
+}
+
+rule acm_avoid_unnecessary_wildcard_certificates {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            when DomainName == /^\*\..*/ {
+                # Wildcard certificates should be justified
+                Tags.*[Key == "Purpose"] {
+                    Value == /.*[Mm]ulti.*/ or 
+                    Value == /.*[Ww]ildcard.*/ << Wildcard certificates should have clear justification >>
+                }
+            }
+        }
+    }
+}
+
+rule acm_environment_appropriate_transparency_logging {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties {
+                CertificateTransparencyLoggingPreference == "ENABLED" << Even dev certificates should use transparency logging for consistency >>
+            }
+        }
+    }
+}
+
+rule acm_certificate_limit_per_environment {
+    # Count certificates to avoid hitting AWS limits
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            Tags exists << Certificates should be tagged for tracking >>
+            Tags.*[Key == "Environment"] {
+                Value in ["dev", "staging", "production"] << Use standard environment values >>
+            }
+        }
+    }
+}
+
+rule acm_dns_validation_cost_efficiency {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            ValidationMethod == "DNS" << DNS validation is free and automated, preferred over email >>
+            DomainValidationOptions exists << Use domain validation options for automated renewal >>
+        }
+    }
+}
+
+# CI/CD Pipeline Cost Optimization Rules
+rule codebuild_environment_sizing {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Environment {
+            ComputeType exists << CodeBuild must specify compute type >>
+            ComputeType in ["BUILD_GENERAL1_SMALL", "BUILD_GENERAL1_MEDIUM", "BUILD_GENERAL1_LARGE", "BUILD_GENERAL1_2XLARGE"] << Use valid compute types >>
+        }
+    }
+}
+
+rule codebuild_development_compute_sizing {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.Environment {
+                ComputeType in ["BUILD_GENERAL1_SMALL", "BUILD_GENERAL1_MEDIUM"] << Development should use smaller compute types >>
+            }
+        }
+    }
+}
+
+rule codebuild_timeout_optimization {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties {
+            TimeoutInMinutes exists << CodeBuild timeout must be specified >>
+            TimeoutInMinutes <= 120 << Build timeout should not exceed 2 hours >>
+            TimeoutInMinutes >= 5 << Build timeout should be at least 5 minutes >>
+            when QueuedTimeoutInMinutes exists {
+                QueuedTimeoutInMinutes <= 60 << Queued timeout should not exceed 1 hour >>
+            }
+        }
+    }
+}
+
+rule codebuild_concurrent_build_limits {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        when Properties.ConcurrentBuildLimit exists {
+            Properties {
+                ConcurrentBuildLimit <= 10 << Limit concurrent builds to control costs >>
+                ConcurrentBuildLimit >= 1 << Concurrent build limit must be at least 1 >>
+            }
+        }
+    }
+}
+
+rule codepipeline_artifact_location_optimization {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.ArtifactStore {
+            Type == "S3" << Use S3 for cost-effective artifact storage >>
+            Location exists << Artifact location must be specified >>
+        }
+    }
+}
+
+rule pipeline_approval_timeout_limits {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*].Actions[*] {
+            when ActionTypeId.Provider == "Manual" {
+                when TimeoutInMinutes exists {
+                    TimeoutInMinutes <= 1440 << Manual approval timeout should not exceed 24 hours >>
+                    TimeoutInMinutes >= 5 << Manual approval timeout should be at least 5 minutes >>
+                }
+            }
+        }
+    }
+}
+
+rule codebuild_image_optimization {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Environment {
+            Image exists << CodeBuild image must be specified >>
+            # Prefer standard AWS images for cost efficiency
+            Image == /aws\/codebuild\/.*/ << Use AWS managed CodeBuild images for cost efficiency >>
+        }
+    }
+}
+
+# IAM Cost Optimization Rules
+rule iam_role_policy_consolidation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties {
+            when Policies exists {
+                length(Policies) <= 10 << Limit number of inline policies per role for management >>
+            }
+            when ManagedPolicyArns exists {
+                length(ManagedPolicyArns) <= 5 << Limit number of managed policies per role >>
+            }
+        }
+    }
+}
+
+rule iam_policy_statement_optimization {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument {
+            when Statement is_list {
+                length(Statement) <= 20 << Limit number of statements per policy for performance >>
+            }
+        }
+    }
+}
+
+rule iam_environment_specific_managed_policies {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.ManagedPolicyArns[*] {
+                this == /.*ReadOnly.*/ or 
+                this == /.*Developer.*/ << Development roles should use less privileged managed policies >>
+            }
+        }
+    }
+}
+
+rule iam_resource_specific_permissions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Effect == "Allow" and Action[*] == /s3:.*/ {
+                Resource exists << S3 actions should specify specific resources >>
+                when Resource is_list {
+                    Resource[*] == /arn:aws:s3:::.*/ << S3 resources should be specific bucket ARNs >>
+                }
+            }
+        }
+    }
+}
+
+rule iam_ecr_permission_optimization {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        Properties.Policies[*].PolicyDocument.Statement[*] {
+            when Action[*] == /ecr:.*/ {
+                when Resource exists and Resource != "*" {
+                    Resource == /.*${Environment}.*/ << ECR permissions should be environment-specific >>
+                }
+            }
+        }
+    }
+}
+
+# CodePipeline Cost Optimization Rules
+rule codepipeline_policy_consolidation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties {
+                when Policies exists {
+                    length(Policies) <= 8 << Limit number of inline policies per CodePipeline role >>
+                }
+                when ManagedPolicyArns exists {
+                    length(ManagedPolicyArns) <= 3 << Limit managed policies for cost efficiency >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_environment_specific_permissions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /s3:.*/ {
+                    Resource[*] == /.*${Environment}.*/ << S3 resources should be environment-specific for cost control >>
+                }
+                when Action[*] == /ecs:.*/ {
+                    Resource[*] == /.*${Environment}.*/ << ECS resources should be environment-specific >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_regional_resource_optimization {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Resource is_list {
+                    Resource[*] {
+                        when this == /arn:aws:.*/ {
+                            this == /.*:${AWS::Region}:.*/ << Resources should be region-specific for cost optimization >>
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_cross_region_restrictions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /codestar-connections:.*/ {
+                    Resource != /.*:\*:.*/ << Development should not have cross-region connection access >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_log_retention_optimization {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /logs:.*/ {
+                    Resource[*] == /.*\/aws\/(codepipeline|codebuild)\/.*/ << Log access should be specific to pipeline services >>
+                }
+            }
+        }
+    }
+}
+
+# ECS Cost Optimization Rules
+rule ecs_role_policy_consolidation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties {
+                when Policies exists {
+                    length(Policies) <= 6 << Limit number of inline policies per ECS role >>
+                }
+                when ManagedPolicyArns exists {
+                    length(ManagedPolicyArns) <= 3 << Limit managed policies for cost efficiency >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_environment_specific_permissions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /s3:.*/ {
+                    Resource[*] == /.*${Environment}.*/ << S3 resources should be environment-specific >>
+                }
+                when Action[*] == /ssm:.*/ {
+                    Resource[*] == /.*\/${Environment}\/.*/ << SSM parameters should be environment-specific >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_development_environment_restrictions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ and Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /cloudwatch:.*/ {
+                    Action[*] != "cloudwatch:*" << Development should not have broad CloudWatch permissions >>
+                }
+                when Action[*] == /s3:.*/ {
+                    Action[*] != "s3:*" << Development should not have broad S3 permissions >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_log_retention_optimization {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == "logs:PutRetentionPolicy" {
+                    Resource[*] == /.*\/${Environment}\/.*/ << Log retention should be environment-specific >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_cross_region_resource_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*ECS.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Resource is_list {
+                    Resource[*] {
+                        when this == /arn:aws:.*/ {
+                            this == /.*:${AWS::Region}:.*/ << Resources should be region-specific for cost optimization >>
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Security Group Cost Optimization Rules
+rule security_group_rule_count_optimization {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties {
+            when SecurityGroupIngress exists {
+                length(SecurityGroupIngress) <= 20 << Limit ingress rules per security group for performance >>
+            }
+            when SecurityGroupEgress exists {
+                length(SecurityGroupEgress) <= 20 << Limit egress rules per security group for performance >>
+            }
+        }
+    }
+}
+
+rule security_group_port_range_optimization {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties.SecurityGroupIngress[*] {
+            when FromPort exists and ToPort exists and FromPort != ToPort {
+                ToPort - FromPort <= 1000 << Large port ranges can impact performance >>
+            }
+        }
+    }
+}
+
+rule security_group_development_restrictions {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.SecurityGroupIngress[*] {
+                when FromPort in [9229, 5005, 8000] {
+                    CidrIp == /^10\.0\..*/ << Development debug access should be limited to development networks >>
+                }
+            }
+        }
+    }
+}
+
+rule security_group_production_egress_cost_optimization {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.SecurityGroupEgress[*] {
+                when FromPort == 443 and ToPort == 443 {
+                    DestinationSecurityGroupId exists or CidrIp == /^10\..*/ << HTTPS traffic should prefer VPC endpoints >>
+                }
+            }
+        }
+    }
+}
+
+rule security_group_consolidation_optimization {
+    Resources.*[ Type == "AWS::EC2::SecurityGroup" ] {
+        Properties.SecurityGroupIngress[*] {
+            when IpProtocol == "tcp" and FromPort == ToPort {
+                # Individual port rules can often be consolidated
+                this exists << Consider consolidating individual port rules >>
+            }
+        }
+    }
+}
+
+# KMS Cost Optimization Rules
+rule kms_key_usage_restriction {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.KeyPolicy.Statement[*] {
+            when Action[*] == /kms:Encrypt|kms:Decrypt|kms:ReEncrypt.*/ {
+                Principal.Service exists or Principal.AWS == /arn:aws:iam::.*:role\/.*/ << Encryption operations should be service or role-specific >>
+            }
+        }
+    }
+}
+
+rule kms_prevent_unnecessary_keys {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.KeyPolicy.Statement[*] {
+            when Principal.Service exists {
+                Principal.Service in ["s3.amazonaws.com", 
+                                     "ebs.amazonaws.com", 
+                                     "rds.amazonaws.com",
+                                     "logs.amazonaws.com",
+                                     "ssm.amazonaws.com"] << Limit to necessary AWS services >>
+            }
+        }
+    }
+}
+
+rule kms_key_policy_statement_optimization {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.KeyPolicy {
+            Statement exists << Key policy must have statements >>
+            length(Statement) <= 10 << Limit number of policy statements for manageability >>
+        }
+    }
+}
+
+rule kms_development_environment_restrictions {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "dev"] exists {
+            Properties.KeyPolicy.Statement[*] {
+                Action[*] != "kms:*" << Development keys should not have unrestricted actions >>
+            }
+        }
+    }
+}
+
+rule kms_cross_account_access_validation {
+    Resources.*[ Type == "AWS::KMS::Key" ] {
+        Properties.KeyPolicy.Statement[*] {
+            when Principal.AWS == /arn:aws:iam::\d+:.*/ {
+                Principal.AWS == /arn:aws:iam::${AWS::AccountId}:.*/ << Cross-account access should be explicitly managed >>
+            }
+        }
+    }
+}

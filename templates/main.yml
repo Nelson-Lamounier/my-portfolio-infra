@@ -221,7 +221,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - VPCStack
-      - CertificateStack
+      - SSLCertificateStack
     Properties:
       TemplateURL: !Sub "https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}networking/application-load-balancer.yml"
       Parameters:
@@ -336,22 +336,23 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-  # Update ECS Roles Stack
-  ECSRolesStack:
+  # ECS Roles Stack (rename from ECSRolesStack for clarity)
+  ECSPoliciesStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: 
+      - KMSStack
+      - VPCStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-roles.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-policies.yml
       Parameters:
         Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
+        VPCId: !GetAtt VPCStack.Outputs.VPCId
+        LogGroupPrefix: !Sub "/ecs/${ProjectName}"
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
 
@@ -381,7 +382,7 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - ECSClusterStack
-      - ECSRolesStack
+      - ECSPoliciesStack
       - ECSSecurityGroupsStack
       - LoadBalancerStack
       - AutoScalingStack
@@ -632,185 +633,214 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-  CertificateStack:
+  SSLCertificateStack:
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/ssl-certificate.yml
       Parameters:
-        RootDomainName: !Ref RootDomainName
-        WWWDomainName: !Ref WWWDomainName
-        Project1DomainName: !Ref Project1Domain
-        Project2DomainName: !Ref Project2Domain
-        ProjectFEDomainName: !Ref ProjectFrontendEcommDomain
-        ProjectBEDomainName: !Ref ProjectBackendEcommDomain
+        Environment: !Ref Environment
         HostedZoneId: !Ref HostedZoneId
+        PrimaryDomainName: !Ref RootDomainName
+        # Environment-specific domain prefix
+        EnvironmentDomainPrefix: !If
+          - !Equals [!Ref Environment, "production"]
+          - ""  # No prefix for production
+          - !Sub "${Environment}."  # dev., staging. prefix
+        DomainsConfig: !Sub |
+          [
+            {
+              "name": "www",
+              "domain": "${WWWDomainName}",
+              "enabled": true
+            },
+            {
+              "name": "project1",
+              "domain": "${Project1Domain}",
+              "enabled": true
+            },
+            {
+              "name": "project2",
+              "domain": "${Project2Domain}",
+              "enabled": true
+            },
+            {
+              "name": "ecomm-frontend",
+              "domain": "${ProjectFrontendEcommDomain}",
+              "enabled": true
+            },
+            {
+              "name": "ecomm-backend",
+              "domain": "${ProjectBackendEcommDomain}",
+              "enabled": true
+            }
+          ]
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
 
-    # Add IAM stacks BEFORE pipeline stacks
+
+  KMSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/kms.yml
+      Parameters:
+        Environment: !Ref Environment
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+  # CodeBuild Policies Stack
   CodeBuildPoliciesStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: KMSStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codebuild-policies.yml
       Parameters:
+        Environment: !Ref Environment
         ArtifactBucket: !Ref ArtifactBucket
-        ProjectName: !FindInMap [TagMap, !Ref Environment, Project]
+        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
+        ProjectsConfig: !Sub |
+          [
+            {
+              "name": "Portfolio",
+              "ecrRepositories": ["${PortfolioECRRepository}"],
+              "enabled": true
+            },
+            {
+              "name": "Project1",
+              "ecrRepositories": ["${Project1ECRRepository}"],
+              "enabled": true
+            },
+            {
+              "name": "Project2",
+              "ecrRepositories": ["project2"],
+              "enabled": true
+            },
+            {
+              "name": "ProjectFullStack",
+              "ecrRepositories": ["frontend-ecomm", "backend-ecomm"],
+              "enabled": true
+            }
+          ]
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
 
+  # CodePipeline Policies Stack
   CodePipelinePoliciesStack:
     Type: AWS::CloudFormation::Stack
+    DependsOn: KMSStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codepipeline-policies.yml
       Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
         ArtifactBucket: !Ref ArtifactBucket
-        ProjectName: !FindInMap [TagMap, !Ref Environment, Project]
-        ConnectionArn: !Ref Project1ConnectionArn
+        ConnectionArn: !Ref GitHubConnectionArn
+        TaskExecutionRoleArn: !GetAtt ECSRolesStack.Outputs.TaskExecutionRoleArn
+        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
 
+  # CI/CD Pipeline Stack
   PipelineStack:
     Type: AWS::CloudFormation::Stack
     DependsOn:
-      - ServiceStack #  Pipeline needs the service first
-      - CodeBuildPoliciesStack #  Pipeline needs CodeBuild IAM role
-      - CodePipelinePoliciesStack #  Pipeline needs CodePipeline IAM role
+      - ECSClusterStack
+      - ECSRolesStack
+      - LoadBalancerStack
     Properties:
       TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
       Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
-        ServiceName: !GetAtt ServiceStack.Outputs.ECSServiceName
-        ProjectName: Portfolio
-        RepositoryId: !Ref PortfolioRepositoryId
-        ConnectionArn: !Ref PortfolioConnectionArn
-        ContainerName: !Ref PortfolioContainerName
-        ECRRepositoryName: !Ref PortfolioECRRepository
+        Environment: !Ref Environment
+        ArtifactBucket: !Sub "${ArtifactBucket}"
         TemplateBucket: !Ref TemplateBucket
+        ConnectionArn: !Ref GitHubConnectionArn
+        # Environment-specific build configuration
+        CodeBuildComputeType: !If
+          - !Equals [!Ref Environment, "production"]
+          - BUILD_GENERAL1_LARGE
+          - BUILD_GENERAL1_MEDIUM
+        EnableApprovals: !If
+          - !Equals [!Ref Environment, "production"]
+          - "true"
+          - "false"
+        ApprovalTimeoutInMinutes: !If
+          - !Equals [!Ref Environment, "production"]
+          - 120  # 2 hours for production
+          - 60   # 1 hour for staging
+        ProjectsConfig: !Sub |
+          [
+            {
+              "name": "Portfolio",
+              "repositoryId": "${PortfolioRepositoryId}",
+              "containerName": "${PortfolioContainerName}",
+              "serviceName": "portfolio-service",
+              "ecrRepository": "${PortfolioECRRepository}",
+              "projectType": "single-container",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            },
+            {
+              "name": "Project1",
+              "repositoryId": "${Project1RepositoryId}",
+              "containerName": "${Project1ContainerName}",
+              "serviceName": "project1-service",
+              "ecrRepository": "${Project1ECRRepository}",
+              "projectType": "single-container",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            },
+            {
+              "name": "Project2",
+              "repositoryId": "${Project2RepositoryId}",
+              "containerName": "project2-container",
+              "serviceName": "project2-service",
+              "ecrRepository": "project2",
+              "projectType": "single-container",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            },
+            {
+              "name": "ProjectFullStack",
+              "repositoryId": "${ProjectFullStackRepositoryId}",
+              "containerName": "project-frontend-ecomm-container",
+              "serviceName": "fullstack-ecomm-service",
+              "ecrRepository": "frontend-ecomm",
+              "secondaryContainerName": "project-backend-ecomm-container",
+              "secondaryServiceName": "backend-ecomm-service",
+              "secondaryEcrRepository": "backend-ecomm",
+              "projectType": "full-stack",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            }
+          ]
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
 
-  Project1PipelineStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - Project1ServiceStack #  Pipeline needs the service first
-      - CodeBuildPoliciesStack #  Pipeline needs CodeBuild IAM role
-      - CodePipelinePoliciesStack #  Pipeline needs CodePipeline IAM role
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
-      Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
-        ServiceName: !GetAtt Project1ServiceStack.Outputs.ECSServiceName
-        ProjectName: Project1
-        RepositoryId: !Ref Project1RepositoryId
-        ConnectionArn: !Ref Project1ConnectionArn
-        ContainerName: !Ref Project1ContainerName
-        ECRRepositoryName: !Ref Project1ECRRepository
-        TemplateBucket: !Ref TemplateBucket
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
 
-  Project2PipelineStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - Project2ServiceStack
-      - CodeBuildPoliciesStack
-      - CodePipelinePoliciesStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
-      Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
-        ServiceName: !GetAtt Project2ServiceStack.Outputs.ECSServiceName
-        ProjectName: Project2
-        RepositoryId: !Ref Project2RepositoryId
-        ConnectionArn: !Ref Project2ConnectionArn
-        ContainerName: !Ref Project2ContainerName
-        ECRRepositoryName: !Ref Project2ECRRepository
-        TemplateBucket: !Ref TemplateBucket
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  ProjectFullStackPipelineStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - ProjectFullStackServiceStack
-      - CodeBuildPoliciesStack
-      - CodePipelinePoliciesStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
-      Parameters:
-        ArtifactBucket: !Ref ArtifactBucket
-        ServiceName: fullstack-ecomm-service
-        ProjectName: ProjectFullStack
-        RepositoryId: !Ref ProjectFullStackRepositoryId # Add this parameter
-        ConnectionArn: !Ref ProjectFullStackConnectionArn # Add this parameter
-        ContainerName: project-frontend-ecomm-container
-        SecondaryContainerName: project-backend-ecomm-container
-        ECRRepositoryName: frontend-ecomm-dev
-        SecondaryECRRepositoryName: backend-ecomm-dev
-        TemplateBucket: !Ref TemplateBucket
-        ProjectType: full-stack
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment

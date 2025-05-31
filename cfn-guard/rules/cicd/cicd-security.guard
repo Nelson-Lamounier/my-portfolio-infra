@@ -1,0 +1,188 @@
+# Dedicated CI/CD Security Rules
+
+# CodeBuild Security Configuration
+rule codebuild_source_type_validation {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Source {
+            Type exists << CodeBuild source type must be specified >>
+            Type in ["CODEPIPELINE", "GITHUB", "GITHUB_ENTERPRISE", "BITBUCKET", "S3"] << Use valid source types >>
+        }
+    }
+}
+
+rule codebuild_buildspec_security {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties {
+            when Source.BuildSpec exists {
+                Source.BuildSpec != "" << BuildSpec cannot be empty if specified >>
+                # Avoid inline buildspecs with sensitive commands
+                Source.BuildSpec != /.*rm\s+-rf.*/ << Avoid dangerous commands in buildspec >>
+            }
+        }
+    }
+}
+
+rule codebuild_privileged_mode_restrictions {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Environment {
+            when PrivilegedMode == true {
+                # Privileged mode should have additional security considerations
+                Type == "LINUX_CONTAINER" << Privileged mode should use Linux containers >>
+                Image == /.*standard.*/ or Image == /.*docker.*/ << Use trusted images with privileged mode >>
+            }
+        }
+    }
+}
+
+rule codebuild_environment_type_security {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Environment {
+            Type exists << Environment type must be specified >>
+            Type in ["LINUX_CONTAINER", "WINDOWS_CONTAINER", "ARM_CONTAINER"] << Use valid environment types >>
+        }
+    }
+}
+
+# CodePipeline Security Configuration
+rule codepipeline_source_connection_security {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*].Actions[*] {
+            when ActionTypeId.Provider == "CodeStarSourceConnection" {
+                Configuration.ConnectionArn exists << Source connections must specify connection ARN >>
+                Configuration.ConnectionArn != "" << Connection ARN cannot be empty >>
+                Configuration.BranchName exists << Source must specify branch name >>
+            }
+        }
+    }
+}
+
+rule codepipeline_deployment_stage_security {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*] {
+            when Name == "Deploy" {
+                Actions[*] {
+                    ActionTypeId.Category == "Deploy" << Deploy stage must have deploy actions >>
+                    InputArtifacts exists << Deploy actions must have input artifacts >>
+                    InputArtifacts not empty << Input artifacts cannot be empty >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_build_stage_validation {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*] {
+            when Name == "Build" {
+                Actions[*] {
+                    ActionTypeId.Provider == "CodeBuild" << Build stage should use CodeBuild >>
+                    Configuration.ProjectName exists << Build action must specify project name >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_approval_configuration {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*].Actions[*] {
+            when ActionTypeId.Provider == "Manual" {
+                Configuration.CustomData exists << Manual approvals should have custom data >>
+                when Configuration.NotificationArn exists {
+                    Configuration.NotificationArn == /arn:aws:sns:.*/ << Notification ARN should be valid SNS topic >>
+                }
+            }
+        }
+    }
+}
+
+# Artifact Security
+rule codepipeline_artifact_encryption_key_validation {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.ArtifactStore.EncryptionKey {
+            Type == "KMS" << Artifact encryption must use KMS >>
+            Id != "" << KMS key ID cannot be empty >>
+            Id == /arn:aws:kms:.*/ or Id == /^[a-f0-9\-]{36}$/ << KMS key must be valid ARN or key ID >>
+        }
+    }
+}
+
+rule codebuild_artifacts_security {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Artifacts {
+            Type exists << Artifacts type must be specified >>
+            Type in ["CODEPIPELINE", "S3", "NO_ARTIFACTS"] << Use valid artifact types >>
+        }
+    }
+}
+
+# Environment Variable Security
+rule codebuild_environment_variables_validation {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Environment.EnvironmentVariables[*] {
+            Name exists << Environment variable name must be specified >>
+            Name != "" << Environment variable name cannot be empty >>
+            Value exists << Environment variable value must be specified >>
+            when Type exists {
+                Type in ["PLAINTEXT", "PARAMETER_STORE", "SECRETS_MANAGER"] << Use valid environment variable types >>
+            }
+        }
+    }
+}
+
+rule codebuild_secrets_management {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        Properties.Environment.EnvironmentVariables[*] {
+            when Name == /.*[Ss]ecret.*/ or Name == /.*[Pp]assword.*/ or Name == /.*[Tt]oken.*/ {
+                Type exists << Sensitive environment variables should specify type >>
+                Type in ["PARAMETER_STORE", "SECRETS_MANAGER"] << Sensitive variables should use secure storage >>
+            }
+        }
+    }
+}
+
+# Branch and Repository Security
+rule codepipeline_branch_protection {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.Stages[*].Actions[*] {
+                when ActionTypeId.Provider == "CodeStarSourceConnection" {
+                    Configuration.BranchName in ["main", "master", "production"] << Production should use protected branches >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_repository_validation {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        Properties.Stages[*].Actions[*] {
+            when Configuration.FullRepositoryId exists {
+                Configuration.FullRepositoryId != "" << Repository ID cannot be empty >>
+                Configuration.FullRepositoryId == /^[a-zA-Z0-9\-_]+\/[a-zA-Z0-9\-_\.]+$/ << Repository ID should be valid format >>
+            }
+        }
+    }
+}
+
+# Testing and Quality Gates
+rule codepipeline_testing_stage_security {
+    Resources.*[ Type == "AWS::CodePipeline::Pipeline" ] {
+        when Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.Stages[*] {
+                some Name in ["Test", "Testing", "QualityGate"] << Production pipelines should include testing stages >>
+            }
+        }
+    }
+}
+
+rule codebuild_test_reports {
+    Resources.*[ Type == "AWS::CodeBuild::Project" ] {
+        when Properties.Tags.*[Key == "Environment" && Value != "dev"] exists {
+            Properties {
+                # Non-dev environments should have proper reporting
+                Artifacts.Type != "NO_ARTIFACTS" << Non-dev builds should produce artifacts >>
+            }
+        }
+    }
+}

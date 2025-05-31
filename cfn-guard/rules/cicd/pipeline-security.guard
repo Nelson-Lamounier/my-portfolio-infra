@@ -1,0 +1,194 @@
+# Dedicated Pipeline Security Rules
+
+# CodePipeline Role Security Configuration
+rule codepipeline_artifact_bucket_isolation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /s3:.*/ and Resource[*] == /.*bucket.*/ {
+                    Resource[*] == /.*-${Environment}.*/ << Artifact buckets should be environment-specific >>
+                    # Validate specific S3 actions for pipeline use
+                    Action[*] in ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"] << Use specific S3 actions for pipelines >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_ecs_deployment_permissions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /ecs:.*/ {
+                    # ECS actions should be deployment-focused
+                    Action[*] in ["ecs:DescribeServices", 
+                                 "ecs:UpdateService", 
+                                 "ecs:DescribeTaskDefinition", 
+                                 "ecs:RegisterTaskDefinition",
+                                 "ecs:ListTasks",
+                                 "ecs:DescribeTasks",
+                                 "ecs:DescribeClusters"] << Limit ECS actions to deployment needs >>
+                    Resource[*] == /.*${Environment}.*/ << ECS resources should be environment-scoped >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_codebuild_project_access {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /codebuild:.*/ {
+                    Action[*] in ["codebuild:StartBuild", "codebuild:BatchGetBuilds", "codebuild:BatchGetProjects"] << Limit CodeBuild actions to pipeline needs >>
+                    Resource[*] == /.*${Environment}.*/ << CodeBuild projects should be environment-specific >>
+                    Resource[*] != "*" << CodeBuild resources should not use wildcards >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_ssm_parameter_access_control {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /ssm:.*/ {
+                    Action[*] in ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"] << Limit SSM actions to read-only >>
+                    Resource[*] == /.*parameter\/${Environment}\/.*/ << SSM parameters should be environment-specific >>
+                    # Allow global parameters only if explicitly needed
+                    when Resource[*] == /.*parameter\/global\/.*/ {
+                        this exists << Global parameters should be explicitly justified >>
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_kms_key_usage_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /kms:.*/ {
+                    Action[*] in ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"] << Limit KMS actions to pipeline needs >>
+                    Resource != "*" << KMS resources should not use wildcards >>
+                    Resource == /arn:aws:kms:.*/ << KMS resources should be specific key ARNs >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_source_control_security {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /codestar-connections:.*/ {
+                    Action[*] in ["codestar-connections:UseConnection", "codestar-connections:PassConnection"] << Limit CodeStar connection actions >>
+                    Resource != "*" << CodeStar connection should specify specific connection ARN >>
+                    Resource == /arn:aws:codeconnections:.*/ << Use valid CodeStar connection ARN format >>
+                }
+            }
+        }
+    }
+}
+
+# Production-Specific Security Requirements
+rule codepipeline_production_audit_permissions {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ and Properties.Tags.*[Key == "Environment" && Value == "production"] exists {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == "cloudtrail:LookupEvents" {
+                    # CloudTrail access should be read-only
+                    Action[*] == "cloudtrail:LookupEvents" << Production audit should be read-only CloudTrail access >>
+                }
+                when Action[*] == "sns:Publish" {
+                    Resource != "*" << SNS resources should be specific topic ARNs >>
+                    Resource == /arn:aws:sns:.*/ << SNS resources should be valid topic ARNs >>
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_cross_region_access_validation {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /codestar-connections:.*/ and Resource == /.*:\*:.*/ {
+                    # Cross-region access should be environment-specific
+                    Properties.Tags.*[Key == "Environment"] {
+                        Value in ["staging", "production"] << Cross-region access should only be for staging/production >>
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Environment Isolation Security
+rule codepipeline_prevent_cross_environment_ecs_access {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Resource[*] == /arn:aws:ecs:.*/ {
+                    Resource[*] {
+                        when this == /.*-(dev|staging|production)-.*/ {
+                            this == /.*-${Environment}-.*/ << ECS resources should match role environment >>
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+rule codepipeline_prevent_cross_environment_s3_access {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Resource[*] == /arn:aws:s3:::.*/ {
+                    Resource[*] {
+                        when this == /.*-(dev|staging|production).*/ {
+                            this == /.*-${Environment}.*/ << S3 resources should match role environment >>
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+# IAM PassRole Security
+rule codepipeline_passrole_task_execution_only {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == "iam:PassRole" {
+                    Resource[*] == /.*TaskExecutionRole.*/ or Resource[*] == /.*ecsTaskExecutionRole.*/ << PassRole should only be for task execution roles >>
+                    Resource[*] == /.*${Environment}.*/ << PassRole resources should be environment-specific >>
+                }
+            }
+        }
+    }
+}
+
+# Logging and Monitoring Security
+rule codepipeline_cloudwatch_logs_scoping {
+    Resources.*[ Type == "AWS::IAM::Role" ] {
+        when Properties.RoleName == /.*CodePipeline.*/ {
+            Properties.Policies[*].PolicyDocument.Statement[*] {
+                when Action[*] == /logs:.*/ {
+                    Resource[*] == /.*\/aws\/(codepipeline|codebuild)\/.*/ << Log access should be specific to pipeline services >>
+                    Resource[*] == /.*${Environment}.*/ << Log resources should be environment-specific >>
+                    Action[*] in ["logs:CreateLogGroup", 
+                                 "logs:CreateLogStream", 
+                                 "logs:PutLogEvents",
+                                 "logs:DescribeLogGroups",
+                                 "logs:DescribeLogStreams"] << Limit log actions to necessary operations >>
+                }
+            }
+        }
+    }
+}

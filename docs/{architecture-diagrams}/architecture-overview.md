@@ -68,3 +68,17 @@ Production Environment:
 - project1.lamounierdigital.com → Project1
 - api.lamounierdigital.com → Backend
 ```
+
+## Pipeline Architecture
+
+```
+Development Environment:
+├── Portfolio-dev-Pipeline → develop branch → auto-trigger
+├── Project1-dev-Pipeline → develop branch → auto-trigger
+└── No approvals, fast builds
+
+Production Environment:
+├── Portfolio-prod-Pipeline → main branch → manual trigger → approval → deploy
+├── Project1-prod-Pipeline → main branch → manual trigger → approval → deploy
+└── Required approvals, large compute, sequential deployments
+```

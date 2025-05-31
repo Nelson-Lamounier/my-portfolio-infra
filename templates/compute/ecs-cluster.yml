@@ -1,13 +1,14 @@
 # @format
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: ECS Cluster for Portfolio Infrastructure
+Description: Environment-aware ECS Cluster with enhanced security and monitoring
 
 Parameters:
-  ECSClusterNameParam:
+  # Rename for consistency
+  ProjectName:
     Type: String
-    Description: Name of the ECS cluster
-    Default: "PortfolioCluster"
+    Description: Project name for resource naming
+    Default: "Portfolio"
   
   Environment:
     Type: String
@@ -15,37 +16,111 @@ Parameters:
     Default: "dev"
     AllowedValues: ["dev", "staging", "production"]
 
+Mappings:
+  # Environment-specific configurations
+  EnvironmentMap:
+    dev:
+      ContainerInsights: "disabled"  # Cost optimization
+      ExecuteCommandLogging: "DEFAULT"
+      CapacityProviders: ["EC2"]
+    staging:
+      ContainerInsights: "enabled"   # Better monitoring
+      ExecuteCommandLogging: "OVERRIDE"
+      CapacityProviders: ["EC2"]
+    production:
+      ContainerInsights: "enabled"   # Full monitoring
+      ExecuteCommandLogging: "OVERRIDE"
+      CapacityProviders: ["EC2"]
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsNonDev: !Not [!Equals [!Ref Environment, "dev"]]
+
 Resources:
+  # CloudWatch Log Group for Execute Command Logging
+  ECSExecuteCommandLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsNonDev
+    Properties:
+      LogGroupName: !Sub "/aws/ecs/cluster/${ProjectName}-${Environment}/execute-command"
+      RetentionInDays: !If [IsProduction, 90, 30]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ECS-ExecuteCommand-Logs-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: "ECS-Logging"
+
+  # Enhanced ECS Cluster
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: !Sub "${ECSClusterNameParam}-${Environment}"
-      CapacityProviders:
-        - EC2
+      ClusterName: !Sub "${ProjectName}-ECSCluster-${Environment}"
+      CapacityProviders: !FindInMap [EnvironmentMap, !Ref Environment, CapacityProviders]
       DefaultCapacityProviderStrategy:
         - CapacityProvider: EC2
           Weight: 1
+          Base: 0
       ClusterSettings:
         - Name: containerInsights
-          Value: !If
-            - !Equals [!Ref Environment, "production"]
-            - enabled
-            - disabled
+          Value: !FindInMap [EnvironmentMap, !Ref Environment, ContainerInsights]
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: !FindInMap [EnvironmentMap, !Ref Environment, ExecuteCommandLogging]
+          KmsKeyId: !If
+            - IsNonDev
+            - !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ecs"
+            - !Ref AWS::NoValue
+          LogConfiguration:
+            CloudWatchLogGroupName: !If
+              - IsNonDev
+              - !Ref ECSExecuteCommandLogGroup
+              - !Ref AWS::NoValue
+            CloudWatchEncryptionEnabled: !If [IsProduction, true, false]
       Tags:
         - Key: Name
-          Value: !Sub "${ECSClusterNameParam}-${Environment}"
+          Value: !Sub "${ProjectName}-ECSCluster-${Environment}"
         - Key: Environment
           Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: "ECS-Cluster"
+        - Key: Purpose
+          Value: "Container Orchestration"
 
 Outputs:
+  # Consistent export naming pattern
   ECSClusterName:
     Description: Name of the ECS cluster
     Value: !Ref ECSCluster
     Export:
-      Name: !Sub "ECSClusterName-${Environment}"
+      Name: !Sub "${ProjectName}-ECSClusterName-${Environment}"
   
   ECSClusterArn:
     Description: ARN of the ECS cluster
     Value: !GetAtt ECSCluster.Arn
     Export:
-      Name: !Sub "ECSClusterArn-${Environment}"
+      Name: !Sub "${ProjectName}-ECSClusterArn-${Environment}"
+
+  ECSClusterConfiguration:
+    Description: ECS cluster configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Project: ${ProjectName}
+      Container Insights: ${EnvironmentMap.${Environment}.ContainerInsights}
+      Execute Command Logging: ${EnvironmentMap.${Environment}.ExecuteCommandLogging}
+      Capacity Providers: EC2
+    Export:
+      Name: !Sub "${ProjectName}-ECSClusterConfig-${Environment}"
+
+  # Additional exports for integration
+  ExecuteCommandLogGroup:
+    Description: CloudWatch log group for ECS execute command logging
+    Value: !If [IsNonDev, !Ref ECSExecuteCommandLogGroup, ""]
+    Export:
+      Name: !Sub "${ProjectName}-ECSExecuteCommandLogGroup-${Environment}"
+    Condition: IsNonDev

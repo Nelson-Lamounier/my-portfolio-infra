@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: |
+  Enhanced KMS key template with proper security controls and least privilege access
+  
+  Creates environment-specific KMS keys with appropriate service permissions,
+  key rotation, and compliance-ready access controls.
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name for key isolation
+    AllowedValues: ["dev", "staging", "production"]
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  KeyUsagePurpose:
+    Type: String
+    Description: Primary purpose of this KMS key
+    Default: "General Application Encryption"
+    AllowedValues: 
+      - "S3 Encryption"
+      - "EBS Encryption"
+      - "RDS Encryption"
+      - "Parameter Store Encryption"
+      - "Log Encryption"
+      - "General Application Encryption"
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, "production"]
+
+Resources:
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${ProjectName} KMS key for ${KeyUsagePurpose} in ${Environment} environment"
+      
+      # Enable automatic key rotation
+      EnableKeyRotation: true
+      
+      # Set key deletion window (7 days minimum for production)
+      PendingWindowInDays: !If [IsProduction, 30, 7]
+      
+      # Enhanced key policy with least privilege
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          # Administrative access
+          - Sid: "EnableKeyAdministration"
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "aws:userid": !If
+                  - IsProduction
+                  - !Sub "${AWS::AccountId}:AIDACKCEVSQ6C2EXAMPLE"  # Replace with actual admin user ID
+                  - !Ref AWS::NoValue
+
+          # Service usage permissions
+          - Sid: "AllowServiceUsage"
+            Effect: Allow
+            Principal:
+              Service:
+                - "s3.amazonaws.com"
+                - "logs.amazonaws.com"
+                - "ssm.amazonaws.com"
+            Action:
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - "kms:DescribeKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "kms:ViaService": 
+                  - !Sub "s3.${AWS::Region}.amazonaws.com"
+                  - !Sub "logs.${AWS::Region}.amazonaws.com"
+                  - !Sub "ssm.${AWS::Region}.amazonaws.com"
+                "kms:EncryptionContext:Environment": !Ref Environment
+
+          # Application role usage
+          - Sid: "AllowApplicationRoleUsage"
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*-${Environment}"
+            Action:
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - "kms:DescribeKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "kms:EncryptionContext:Environment": !Ref Environment
+                "kms:EncryptionContext:Project": !Ref ProjectName
+
+          # Grant creation permissions
+          - Sid: "AllowGrantCreation"
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*-${Environment}"
+            Action:
+              - "kms:CreateGrant"
+              - "kms:ListGrants"
+              - "kms:RevokeGrant"
+            Resource: "*"
+            Condition:
+              Bool:
+                "kms:GrantIsForAWSResource": "true"
+              StringEquals:
+                "kms:ViaService":
+                  - !Sub "s3.${AWS::Region}.amazonaws.com"
+                  - !Sub "rds.${AWS::Region}.amazonaws.com"
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-KMSKey-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: !Ref KeyUsagePurpose
+        - Key: ManagedBy
+          Value: "CloudFormation"
+        - Key: KeyRotation
+          Value: "Enabled"
+
+  KMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-${Environment}-${KeyUsagePurpose}"
+      TargetKeyId: !Ref KMSKey
+
+Outputs:
+  KMSKeyArn:
+    Description: !Sub "KMS Key ARN for ${KeyUsagePurpose} in ${Environment}"
+    Value: !GetAtt KMSKey.Arn
+    Export:
+      Name: !Sub "${ProjectName}-KMSKeyArn-${Environment}"
+
+  KMSKeyId:
+    Description: !Sub "KMS Key ID for ${KeyUsagePurpose} in ${Environment}"
+    Value: !Ref KMSKey
+    Export:
+      Name: !Sub "${ProjectName}-KMSKeyId-${Environment}"
+
+  KMSKeyAlias:
+    Description: !Sub "KMS Key Alias for ${KeyUsagePurpose} in ${Environment}"
+    Value: !Ref KMSKeyAlias
+    Export:
+      Name: !Sub "${ProjectName}-KMSKeyAlias-${Environment}"
+
+  KeySecuritySummary:
+    Description: Security configuration summary for the KMS key
+    Value: !Sub |
+      Environment: ${Environment}
+      Purpose: ${KeyUsagePurpose}
+      Key Rotation: Enabled
+      Deletion Window: ${PendingWindowInDays} days
+      Access Control: Service and Role-based
+    Export:
+      Name: !Sub "${ProjectName}-KMSKeySecurity-${Environment}"

@@ -200,6 +200,19 @@ Resources:
         # Multi-container configuration
         - - Name: !Ref ContainerName
             Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
+            # Security improvements
+            ReadonlyRootFilesystem: true
+            User: "1000:1000"  # Non-root user
+            # Health check configuration
+            HealthCheck:
+            Command:
+              - CMD-SHELL
+              - "curl -f http://localhost:${ContainerPort}/health || exit 1"
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+            # Resource limits
             Cpu: !If
               - !Equals [!Ref PrimaryCPU, 0]
               - !Ref
@@ -237,8 +250,27 @@ Resources:
                 Value: !Ref Environment
               - Name: PROJECT_NAME
                 Value: !Ref ProjectName
+              - Name: LOG_LEVEL
+                Value: !If [IsProduction, "WARN", "DEBUG"]
+              # Use Secrets Manager for sensitive data
+            Secrets:
+              - Name: DATABASE_PASSWORD
+                ValueFrom: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}-db-password-${Environment}"
           - Name: !Ref SecondaryContainerName
             Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${SecondaryECRRepository}:latest"
+            # Security improvements
+            ReadonlyRootFilesystem: true
+            User: "1000:1000"  # Non-root user
+            # Health check configuration
+            HealthCheck:
+              Command:
+                - CMD-SHELL
+                - "curl -f http://localhost:${ContainerPort}/health || exit 1"
+              Interval: 30
+              Timeout: 5
+              Retries: 3
+              StartPeriod: 60
+            # Resource limits
             Cpu: !If
               - !Equals [!Ref SecondaryCPU, 0]
               - !Ref
@@ -276,10 +308,29 @@ Resources:
                 Value: !Ref Environment
               - Name: PROJECT_NAME
                 Value: !Ref ProjectName
+              - Name: LOG_LEVEL
+                Value: !If [IsProduction, "WARN", "DEBUG"]
+            # Use Secrets Manager for sensitive data
+            Secrets:
+              - Name: DATABASE_PASSWORD
+                ValueFrom: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}-db-password-${Environment}"
 
         # Single-container configuration
         - - Name: !Ref ContainerName
             Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
+            # Security improvements
+            ReadonlyRootFilesystem: true
+            User: "1000:1000"  # Non-root user
+            # Health check configuration
+            HealthCheck:
+              Command:
+                - CMD-SHELL
+                - "curl -f http://localhost:${ContainerPort}/health || exit 1"
+              Interval: 30
+              Timeout: 5
+              Retries: 3
+              StartPeriod: 60
+            # Resource limits
             Cpu: !Ref CPU
             MemoryReservation: !Ref Memory
             Essential: true
@@ -299,6 +350,12 @@ Resources:
                 Value: !Ref Environment
               - Name: PROJECT_NAME
                 Value: !Ref ProjectName
+              - Name: LOG_LEVEL
+                Value: !If [IsProduction, "WARN", "DEBUG"]
+            # Use Secrets Manager for sensitive data
+            Secrets:
+              - Name: DATABASE_PASSWORD
+                ValueFrom: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${ProjectName}-db-password-${Environment}"
       Tags:
         - Key: Environment
           Value: !Ref Environment
