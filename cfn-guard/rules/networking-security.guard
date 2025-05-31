@@ -1,0 +1,31 @@
+# Networking Security Rules
+let security_groups = Resources.*[ Type == "AWS::EC2::SecurityGroup" ]
+let load_balancers = Resources.*[ Type == "AWS::ElasticLoadBalancingV2::LoadBalancer" ]
+
+# ALB-specific rules
+rule ALB_INTERNET_FACING_ONLY_WEB_PORTS {
+    %security_groups {
+        when Properties.GroupDescription contains "Load Balancer" {
+            Properties.SecurityGroupIngress[*] {
+                when CidrIp == "0.0.0.0/0" {
+                    FromPort in [80, 443]
+                    ToPort in [80, 443]
+                    <<ALB should only expose ports 80 and 443 to internet>>
+                }
+            }
+        }
+    }
+}
+
+# General security group rules
+rule SECURITY_GROUP_NO_UNRESTRICTED_INGRESS {
+    %security_groups {
+        Properties.SecurityGroupIngress[*] {
+            when IpProtocol != "icmp" {
+                some CidrIp != "0.0.0.0/0" or
+                some SourceSecurityGroupId exists
+                <<Security groups should not allow unrestricted access except for web traffic>>
+            }
+        }
+    }
+}

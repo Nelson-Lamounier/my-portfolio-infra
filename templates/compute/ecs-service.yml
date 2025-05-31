@@ -1,6 +1,7 @@
 # @format
 ---
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: |
   Dynamic ECS Service and Task Definition Template
 
@@ -9,167 +10,216 @@ Description: |
   multi-tier applications with multiple containers.
 
 Parameters:
-  ProjectName:
+  # Environment Parameter (Required for all resources)
+  Environment:
     Type: String
+    Description: Environment name for resource naming and isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+  ProjectName:
     Description: |
       Unique identifier for the project (e.g., 'Portfolio', 'Project1', 'ProjectFullStack').
       Used to create unique resource names and avoid conflicts between services.
+    Type: String
 
   ServiceName:
-    Type: String
     Description: |
       Name for the ECS service within the cluster.
       Will be used as the service identifier and for monitoring purposes.
+    Type: String
 
   # Primary Container Parameters (Required)
   ContainerName:
-    Type: String
     Description: Primary container name for single-container services
+    Type: String
 
   ECRRepository:
-    Type: String
     Description: ECR repository for primary container
+    Type: String
 
   ContainerPort:
-    Type: Number
     Description: Port for primary container
+    Type: Number
 
   HostPort:
-    Type: Number
     Description: Host port for primary container
+    Type: Number
 
   # Optional Secondary Container Parameters
   SecondaryContainerName:
-    Type: String
     Description: Name of secondary container (optional)
+    Type: String
     Default: ""
 
   SecondaryECRRepository:
-    Type: String
     Description: ECR repository for secondary container (optional)
+    Type: String
     Default: ""
 
   SecondaryContainerPort:
-    Type: Number
     Description: Port for secondary container
+    Type: Number
     Default: 0
 
   SecondaryHostPort:
-    Type: Number
     Description: Host port for secondary container
+    Type: Number
     Default: 0
 
   SecondaryTargetGroupArn:
-    Type: String
     Description: Target group ARN for secondary container (optional)
+    Type: String
     Default: ""
 
   # Resource Parameters
   CPU:
-    Type: Number
     Description: Total CPU units for the task
+    Type: Number
     Default: 256
 
   Memory:
-    Type: Number
     Description: Total memory for the task
+    Type: Number
     Default: 512
 
   # Primary container gets 60% of resources, secondary gets 40%
   PrimaryCPU:
-    Type: Number
     Description: CPU units for primary container (auto-calculated if 0)
+    Type: Number
     Default: 0
 
   SecondaryCPU:
-    Type: Number
     Description: CPU units for secondary container (auto-calculated if 0)
+    Type: Number
     Default: 0
 
   PrimaryMemory:
-    Type: Number
     Description: Memory for primary container (auto-calculated if 0)
+    Type: Number
     Default: 0
 
   SecondaryMemory:
-    Type: Number
     Description: Memory for secondary container (auto-calculated if 0)
+    Type: Number
     Default: 0
 
   DesiredCount:
-    Type: Number
     Description: Number of tasks to maintain running
+    Type: Number
     Default: 1
 
-  TargetGroupArn:
-    Type: String
-    Description: ARN of the ALB target group for primary container
-
   Region:
-    Type: String
     Description: AWS region for deployment
+    Type: String
 
   MigrationMode:
-    Type: String
     Description: Migration mode to handle existing log groups
-    Default: "migrate"
-    AllowedValues: ["migrate", "no-migrate"]
+    Type: String
+    AllowedValues:
+      - migrate
+      - no-migrate
+    Default: migrate
 
   ExportSuffix:
-    Type: String
     Description: Optional suffix for export names
+    Type: String
     Default: ""
 
 Conditions:
-  CreateNewLogGroup: !Equals [!Ref MigrationMode, "no-migrate"]
-  HasExportSuffix: !Not [!Equals [!Ref ExportSuffix, ""]]
-  HasSecondaryContainer: !Not [!Equals [!Ref SecondaryContainerName, ""]]
-  HasSecondaryTargetGroup: !Not [!Equals [!Ref SecondaryTargetGroupArn, ""]]
+  CreateNewLogGroup: !Equals
+    - !Ref MigrationMode
+    - no-migrate
+
+  HasExportSuffix: !Not
+    - !Equals
+      - !Ref ExportSuffix
+      - ""
+
+  HasSecondaryContainer: !Not
+    - !Equals
+      - !Ref SecondaryContainerName
+      - ""
+
+  HasSecondaryTargetGroup: !Not
+    - !Equals
+      - !Ref SecondaryTargetGroupArn
+      - ""
 
   CreateSecondaryLogGroup: !And
-    - !Equals [!Ref MigrationMode, "no-migrate"]
-    - !Not [!Equals [!Ref SecondaryContainerName, ""]]
-  # AutoCalculateResources: !And
-  #   - !Equals [!Ref PrimaryCPU, 0]
-  #   - !Equals [!Ref PrimaryMemory, 0]
+    - !Equals
+      - !Ref MigrationMode
+      - no-migrate
+    - !Not
+      - !Equals
+        - !Ref SecondaryContainerName
+        - ""
 
 Resources:
   # Primary Container Log Group
   PrimaryLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: CreateNewLogGroup
     DeletionPolicy: Retain
+    Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/ecs/${ProjectName}-primary-task"
-      RetentionInDays: 7
+      LogGroupName: !Sub "/ecs/${Environment}/${ProjectName}-primary-task"
+      RetentionInDays: !If
+        - !Equals [!Ref Environment, "production"]
+        - 30
+        - 7
+    Condition: CreateNewLogGroup
 
   # Secondary Container Log Group (conditional)
   SecondaryLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: CreateSecondaryLogGroup
     DeletionPolicy: Retain
+    Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/ecs/${ProjectName}-secondary-task"
-      RetentionInDays: 7
+      LogGroupName: !Sub "/ecs/${Environment}/${ProjectName}-secondary-task"
+      RetentionInDays: !If
+        - !Equals [!Ref Environment, "production"]
+        - 30
+        - 7
+    Condition: CreateSecondaryLogGroup
 
   # Task Definition with conditional multi-container support
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub "${ProjectName}-task"
+      Family: !Sub "${Environment}-${ProjectName}-task"
       Cpu: !Ref CPU
       Memory: !Ref Memory
       RequiresCompatibilities:
         - EC2
       NetworkMode: bridge
-      ExecutionRoleArn: !ImportValue TaskExecutionRoleArn
+      ExecutionRoleArn: !ImportValue 
+        Fn::Sub: "TaskExecutionRoleArn-${Environment}"
+      TaskRoleArn: !ImportValue 
+        Fn::Sub: "TaskRoleArn-${Environment}"
       ContainerDefinitions: !If
         - HasSecondaryContainer
+
         # Multi-container configuration
         - - Name: !Ref ContainerName
             Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
-            Cpu: 256
-            MemoryReservation: 512
+            Cpu: !If
+              - !Equals [!Ref PrimaryCPU, 0]
+              - !Ref
+                Fn::Select:
+                  - 0
+                  - Fn::Split:
+                      - "."
+                      - !Ref
+                        Fn::Sub: "${CPU} * 0.6"
+              - !Ref PrimaryCPU
+            MemoryReservation: !If
+              - !Equals [!Ref PrimaryMemory, 0]
+              - !Ref
+                Fn::Select:
+                  - 0
+                  - Fn::Split:
+                      - "."
+                      - !Ref
+                        Fn::Sub: "${Memory} * 0.6"
+              - !Ref PrimaryMemory
             Essential: true
             PortMappings:
               - ContainerPort: !Ref ContainerPort
@@ -178,14 +228,37 @@ Resources:
             LogConfiguration:
               LogDriver: awslogs
               Options:
-                awslogs-group: !Sub "/ecs/${ProjectName}-primary-task"
+                awslogs-group: !Sub "/ecs/${Environment}/${ProjectName}-primary-task"
                 awslogs-region: !Ref Region
                 awslogs-stream-prefix: ecs
                 awslogs-create-group: "true"
+            Environment:
+              - Name: ENVIRONMENT
+                Value: !Ref Environment
+              - Name: PROJECT_NAME
+                Value: !Ref ProjectName
           - Name: !Ref SecondaryContainerName
             Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${SecondaryECRRepository}:latest"
-            Cpu: 256
-            MemoryReservation: 512
+            Cpu: !If
+              - !Equals [!Ref SecondaryCPU, 0]
+              - !Ref
+                Fn::Select:
+                  - 0
+                  - Fn::Split:
+                      - "."
+                      - !Ref
+                        Fn::Sub: "${CPU} * 0.4"
+              - !Ref SecondaryCPU
+            MemoryReservation: !If
+              - !Equals [!Ref SecondaryMemory, 0]
+              - !Ref
+                Fn::Select:
+                  - 0
+                  - Fn::Split:
+                      - "."
+                      - !Ref
+                        Fn::Sub: "${Memory} * 0.4"
+              - !Ref SecondaryMemory
             Essential: true
             PortMappings:
               - ContainerPort: !Ref SecondaryContainerPort
@@ -194,10 +267,16 @@ Resources:
             LogConfiguration:
               LogDriver: awslogs
               Options:
-                awslogs-group: !Sub "/ecs/${ProjectName}-secondary-task"
+                awslogs-group: !Sub "/ecs/${Environment}/${ProjectName}-secondary-task"
                 awslogs-region: !Ref Region
                 awslogs-stream-prefix: ecs
                 awslogs-create-group: "true"
+            Environment:
+              - Name: ENVIRONMENT
+                Value: !Ref Environment
+              - Name: PROJECT_NAME
+                Value: !Ref ProjectName
+
         # Single-container configuration
         - - Name: !Ref ContainerName
             Image: !Sub "${AWS::AccountId}.dkr.ecr.${Region}.amazonaws.com/${ECRRepository}:latest"
@@ -211,44 +290,71 @@ Resources:
             LogConfiguration:
               LogDriver: awslogs
               Options:
-                awslogs-group: !Sub "/ecs/${ProjectName}-primary-task"
+                awslogs-group: !Sub "/ecs/${Environment}/${ProjectName}-primary-task"
                 awslogs-region: !Ref Region
                 awslogs-stream-prefix: ecs
                 awslogs-create-group: "true"
+            Environment:
+              - Name: ENVIRONMENT
+                Value: !Ref Environment
+              - Name: PROJECT_NAME
+                Value: !Ref ProjectName
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
 
   # ECS Service with conditional load balancer configuration
   ECSService:
     Type: AWS::ECS::Service
     Properties:
-      ServiceName: !Ref ServiceName
-      Cluster: !ImportValue ECSClusterName
+      ServiceName: !Sub "${Environment}-${ProjectName}-${ServiceName}"
+      Cluster: !ImportValue 
+        Fn::Sub: "ECSClusterName-${Environment}"
       DesiredCount: !Ref DesiredCount
       LaunchType: EC2
       TaskDefinition: !Ref TaskDefinition
       LoadBalancers: !If
         - HasSecondaryTargetGroup
+
         # Multi-container load balancers
         - - ContainerName: !Ref ContainerName
             ContainerPort: !Ref ContainerPort
-            TargetGroupArn: !Ref TargetGroupArn
+            TargetGroupArn: !ImportValue 
+              Fn::Sub: "${ProjectName}TargetGroupArn-${Environment}"
           - ContainerName: !Ref SecondaryContainerName
             ContainerPort: !Ref SecondaryContainerPort
-            TargetGroupArn: !Ref SecondaryTargetGroupArn
+            TargetGroupArn: !ImportValue 
+              Fn::Sub: "${SecondaryProjectName}TargetGroupArn-${Environment}"
+
         # Single-container load balancer
         - - ContainerName: !Ref ContainerName
             ContainerPort: !Ref ContainerPort
-            TargetGroupArn: !Ref TargetGroupArn
+            TargetGroupArn: !ImportValue 
+              Fn::Sub: "${ProjectName}TargetGroupArn-${Environment}"
       EnableECSManagedTags: true
       DeploymentController:
         Type: ECS
       HealthCheckGracePeriodSeconds: 180
       DeploymentConfiguration:
-        MaximumPercent: 200
-        MinimumHealthyPercent: 50
+        MaximumPercent: !If
+          - !Equals [!Ref Environment, "production"]
+          - 200
+          - 100
+        MinimumHealthyPercent: !If
+          - !Equals [!Ref Environment, "production"]
+          - 50
+          - 0
         DeploymentCircuitBreaker:
           Enable: true
-          Rollback: true
+          Rollback: !If
+            - !Equals [!Ref Environment, "production"]
+            - true
+            - false
       Tags:
+        - Key: Environment
+          Value: !Ref Environment
         - Key: Project
           Value: !Ref ProjectName
         - Key: ServiceType
@@ -259,16 +365,34 @@ Resources:
 Outputs:
   ECSServiceName:
     Description: Name of the ECS service
-    Value: !Ref ServiceName # Return service name, not ARN
+    Value: !Ref ECSService
     Export:
-      Name: !Sub "${ProjectName}ECSServiceName"
+      Name: !Sub "${Environment}-${ProjectName}-ECSServiceName"
 
   ECSServiceArn:
     Description: ARN of the ECS service
     Value: !Ref ECSService
     Export:
-      Name: !Sub "${ProjectName}ECSServiceArn"
+      Name: !Sub "${Environment}-${ProjectName}-ECSServiceArn"
 
   TaskDefinitionArn:
     Description: ARN of the task definition
     Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub "${Environment}-${ProjectName}-TaskDefinitionArn"
+
+  PrimaryLogGroupName:
+    Description: Name of the primary container log group
+    Value: !Sub "/ecs/${Environment}/${ProjectName}-primary-task"
+    Export:
+      Name: !Sub "${Environment}-${ProjectName}-PrimaryLogGroup"
+
+  SecondaryLogGroupName:
+    Description: Name of the secondary container log group
+    Value: !If
+      - HasSecondaryContainer
+      - !Sub "/ecs/${Environment}/${ProjectName}-secondary-task"
+      - "N/A"
+    Export:
+      Name: !Sub "${Environment}-${ProjectName}-SecondaryLogGroup"
+    Condition: HasSecondaryContainer

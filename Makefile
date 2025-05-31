@@ -1,227 +1,304 @@
-# @format
-# Portfolio Infrastructure Management
-# Author: Nelson Lamounier
-# Description: Makefile for managing CloudFormation infrastructure with Rain and CFN Guard
+.PHONY: validate lint deploy-dry deploy clean test-all pre-check syntax-check upload-templates
 
-.PHONY: help install validate deploy clean security-check format lint
+# Load environment variables
+include .env
+export
+
+# === VALIDATION AND TESTING ===
+
+# CloudFormation syntax check with parameter handling
+syntax-check:
+	   @echo "🔍 Checking CloudFormation template syntax..."
+	   @# Check main template first (it has all parameters)
+	   @echo "Validating main template..."
+	   @aws cloudformation validate-template \
+	       --template-body file://templates/main.yml \
+	       --region $(REGION) > /dev/null || exit 1
+	   @# Check individual templates that don't depend on main stack parameters
+	   @for template in templates/core/*.yml templates/security/*.yml; do \
+	       if [ -f "$$template" ]; then \
+	           echo "Validating $$template..."; \
+	           aws cloudformation validate-template \
+	               --template-body file://$$template \
+	               --region $(REGION) > /dev/null || exit 1; \
+	       fi; \
+	   done
+	   @echo "✅ CloudFormation syntax check passed!"
+
+# Rain syntax check (faster, handles parameters better)
+syntax-check-rain:
+	   @echo "🔍 Checking template syntax with Rain..."
+	   @for template in templates/**/*.yml; do \
+	       if [ -f "$$template" ]; then \
+	           echo "Validating $$template..."; \
+	           rain fmt --verify "$$template" || exit 1; \
+	       fi; \
+	   done
+	   @echo "✅ Rain syntax check passed!"
+
+# Validate templates with cfn-lint (better parameter handling)
+cfn-lint:
+	   @echo "🔍 Running cfn-lint validation..."
+	   @if command -v cfn-lint >/dev/null 2>&1; then \
+	       for template in templates/**/*.yml; do \
+	           if [ -f "$$template" ]; then \
+	               echo "Linting $$template..."; \
+	               cfn-lint "$$template" || exit 1; \
+	           fi; \
+	       done; \
+	       echo "✅ cfn-lint validation passed!"; \
+	   else \
+	       echo "⚠️  cfn-lint not installed. Run: make install-tools"; \
+	   fi
+
+# Pre-deployment checks
+pre-check:
+	   @echo "🚀 Running pre-deployment checks..."
+	   @chmod +x scripts/validation/pre-deploy-check.sh
+	   @./scripts/validation/pre-deploy-check.sh
+
+# CFN-Guard validation
+validate:
+	   @echo "🔍 Running CFN-Guard validation..."
+	   @chmod +x scripts/validation/validate-security.sh
+	   @./scripts/validation/validate-security.sh
+
+# Rain linting and formatting
+lint:
+	   @echo "🔧 Linting CloudFormation templates with Rain..."
+	   @for template in templates/**/*.yml; do \
+	       if [ -f "$$template" ]; then \
+	           echo "Linting $$template..."; \
+	           rain fmt --verify "$$template" || exit 1; \
+	       fi; \
+	   done
+	   @echo "✅ Linting completed!"
+
+# Format templates with Rain
+format:
+	   @echo "🎨 Formatting CloudFormation templates with Rain..."
+	   @for template in templates/**/*.yml; do \
+	       if [ -f "$$template" ]; then \
+	           echo "Formatting $$template..."; \
+	           rain fmt --write "$$template"; \
+	       fi; \
+	   done
+	   @echo "✅ Templates formatted!"
+
+# Check if templates need formatting
+format-check:
+	   @echo "🔍 Checking if templates need formatting..."
+	   @for template in templates/**/*.yml; do \
+	       if [ -f "$$template" ]; then \
+	           echo "Checking format of $$template..."; \
+	           if ! rain fmt --verify "$$template" >/dev/null 2>&1; then \
+	               echo "❌ $$template needs formatting. Run 'make format'"; \
+	               exit 1; \
+	           fi; \
+	       fi; \
+	   done
+	   @echo "✅ All templates are properly formatted!"
+
+# Dry run deployment
+deploy-dry:
+	   @echo "🧪 Running dry-run deployment with Rain..."
+	   @rain deploy templates/main.yml $(STACK_NAME) \
+	       --params TemplateBucket=$(BUCKET_NAME) \
+	       --params TemplatePrefix=$(TEMPLATE_PREFIX) \
+	       --params Environment=$(ENVIRONMENT) \
+	       --params ECSClusterNameParam=$(ECS_CLUSTER) \
+	       --params RootDomainName=$(ROOT_DOMAIN_NAME) \
+	       --params WWWDomainName=$(WWW_DOMAIN_NAME) \
+	       --params Project1Domain=$(PROJECT1_DOMAIN) \
+	       --params Project2Domain=$(PROJECT2_DOMAIN) \
+	       --params ProjectFrontendEcommDomain=$(PROJECT3_FRONTEND_DOMAIN) \
+	       --params ProjectBackendEcommDomain=$(PROJECT3_BACKEND_DOMAIN) \
+	       --params HostedZoneId=$(HOSTED_ZONE_ID) \
+	       --dry-run \
+	       --region $(REGION)
+
+# Preview changes with Rain
+preview:
+	   @echo "🔮 Previewing changes with Rain..."
+	   @rain forecast templates/main.yml $(STACK_NAME) \
+	       --params TemplateBucket=$(BUCKET_NAME) \
+	       --params TemplatePrefix=$(TEMPLATE_PREFIX) \
+	       --params Environment=$(ENVIRONMENT) \
+	       --params ECSClusterNameParam=$(ECS_CLUSTER) \
+	       --region $(REGION)
+
+# === DEPLOYMENT ===
+
+# Upload templates to S3
+upload-templates:
+	   @echo "📤 Uploading templates to S3..."
+	   @aws s3 sync ./templates/ "s3://$(BUCKET_NAME)/$(TEMPLATE_PREFIX)" \
+	       --exclude "*" \
+	       --include "*.yml" \
+	       --delete \
+	       --region "$(REGION)"
+	   @echo "✅ Templates uploaded to s3://$(BUCKET_NAME)/$(TEMPLATE_PREFIX)"
+
+# Complete test suite with better parameter handling
+test-all: format-check syntax-check-rain cfn-lint pre-check validate deploy-dry
+	   @echo "🎉 All tests completed successfully!"
+
+# Faster local test suite
+test-local: format-check syntax-check-rain validate
+	   @echo "🎉 Local tests completed successfully!"
+
+# Quick development test (fastest)
+test-quick: syntax-check-rain
+	   @echo "🎉 Quick syntax check completed!"
+
+# Deploy infrastructure
+deploy: test-all upload-templates
+	   @echo "🚀 Deploying infrastructure..."
+	   @chmod +x scripts/deployment/deploy-infrastructure.sh
+	   @./scripts/deployment/deploy-infrastructure.sh
+
+# === MONITORING ===
+
+# Monitor stack status
+monitor:
+	   @echo "📊 Monitoring stack status..."
+	   @watch -n 30 "aws cloudformation describe-stacks \
+	       --stack-name $(STACK_NAME) \
+	       --region $(REGION) \
+	       --query 'Stacks[0].StackStatus' \
+	       --output text"
+
+# Watch stack events with Rain
+watch:
+	   @echo "👀 Watching stack events with Rain..."
+	   @rain watch $(STACK_NAME) --region $(REGION)
+
+# Show stack outputs
+outputs:
+	   @echo "📋 Stack Outputs:"
+	   @aws cloudformation describe-stacks \
+	       --stack-name $(STACK_NAME) \
+	       --region $(REGION) \
+	       --query 'Stacks[0].Outputs[].[OutputKey,OutputValue,Description]' \
+	       --output table
+
+# Show stack events
+events:
+	   @echo "📝 Recent Stack Events:"
+	   @aws cloudformation describe-stack-events \
+	       --stack-name $(STACK_NAME) \
+	       --region $(REGION) \
+	       --query 'StackEvents[0:10].[Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+	       --output table
+
+# Show logs with Rain
+logs:
+	   @echo "📜 Showing stack logs with Rain..."
+	   @rain logs $(STACK_NAME) --region $(REGION)
+
+# === TOOLS INSTALLATION ===
+
+install-tools:
+	   @echo "🔧 Installing required tools..."
+	   @# Install cfn-lint
+	   @if command -v pip >/dev/null 2>&1; then \
+	       pip install cfn-lint; \
+	   elif command -v pip3 >/dev/null 2>&1; then \
+	       pip3 install cfn-lint; \
+	   else \
+	       echo "❌ pip not found. Please install Python and pip first"; \
+	   fi
+	   @# Install Rain (macOS)
+	   @if command -v brew >/dev/null 2>&1; then \
+	       brew install rain; \
+	   else \
+	       echo "❌ Homebrew not found. Please install Rain manually"; \
+	   fi
+	   @# Install cfn-guard
+	   @if command -v cargo >/dev/null 2>&1; then \
+	       cargo install cfn-guard; \
+	   else \
+	       echo "⚠️  Rust/Cargo not found. Please install cfn-guard manually"; \
+	   fi
+	   @echo "✅ Tool installation completed!"
+
+# Check if required tools are installed
+check-tools:
+	   @echo "🔍 Checking required tools..."
+	   @tools="aws rain cfn-lint cfn-guard"; \
+	   missing=""; \
+	   for tool in $$tools; do \
+	       if ! command -v $$tool >/dev/null 2>&1; then \
+	           missing="$$missing $$tool"; \
+	       else \
+	           echo "✅ $$tool is installed"; \
+	       fi; \
+	   done; \
+	   if [ -n "$$missing" ]; then \
+	       echo "❌ Missing tools:$$missing"; \
+	       echo "Run 'make install-tools' to install them"; \
+	       exit 1; \
+	   else \
+	       echo "🎉 All required tools are installed!"; \
+	   fi
+
+# === CLEANUP ===
+
+# Clean up stack
+clean:
+	   @echo "🗑️  Cleaning up stack..."
+	   @aws cloudformation delete-stack \
+	       --stack-name $(STACK_NAME) \
+	       --region $(REGION)
+	   @echo "Stack deletion initiated. Monitor with 'make monitor'"
+
+# Force clean with Rain
+clean-force:
+	   @echo "🗑️  Force cleaning up stack with Rain..."
+	   @rain rm $(STACK_NAME) --region $(REGION) || true
+
+# === UTILITIES ===
+
+# Show help
+help:
+	   @echo "Available targets:"
+	   @echo ""
+	   @echo "📋 Validation:"
+	   @echo "  syntax-check-rain - Validate syntax with Rain (recommended)"
+	   @echo "  syntax-check      - Validate CloudFormation syntax (AWS API)"
+	   @echo "  cfn-lint          - Run cfn-lint validation"
+	   @echo "  format-check      - Check if templates need formatting"
+	   @echo "  validate          - Run CFN-Guard validation"
+	   @echo ""
+	   @echo "🔧 Formatting:"
+	   @echo "  format            - Format templates with Rain"
+	   @echo "  lint              - Verify template formatting"
+	   @echo ""
+	   @echo "🧪 Testing:"
+	   @echo "  test-quick        - Quick syntax check only"
+	   @echo "  test-local        - Local tests (faster)"
+	   @echo "  test-all          - Complete test suite"
+	   @echo "  deploy-dry        - Dry run deployment"
+	   @echo "  preview           - Preview changes with Rain"
+	   @echo ""
+	   @echo "🚀 Deployment:"
+	   @echo "  upload-templates  - Upload templates to S3"
+	   @echo "  deploy            - Deploy infrastructure"
+	   @echo ""
+	   @echo "📊 Monitoring:"
+	   @echo "  monitor           - Monitor stack status"
+	   @echo "  watch             - Watch stack events with Rain"
+	   @echo "  outputs           - Show stack outputs"
+	   @echo "  events            - Show recent stack events"
+	   @echo "  logs              - Show stack logs with Rain"
+	   @echo ""
+	   @echo "🔧 Tools:"
+	   @echo "  install-tools     - Install required tools"
+	   @echo "  check-tools       - Check if tools are installed"
+	   @echo ""
+	   @echo "🗑️  Cleanup:"
+	   @echo "  clean             - Delete stack"
+	   @echo "  clean-force       - Force delete with Rain"
+
+# Default target
 .DEFAULT_GOAL := help
-
-# Configuration
-AWS_REGION ?= eu-west-1
-ENVIRONMENT ?= dev
-TEMPLATE_BUCKET ?= your-cloudformation-templates-bucket
-ARTIFACT_BUCKET ?= your-codepipeline-artifacts-bucket
-
-# Colors for output
-GREEN := \033[0;32m
-YELLOW := \033[1;33m
-RED := \033[0;31m
-NC := \033[0m # No Color
-
-help: ## Show this help message
-	@echo "$(GREEN)🌧️  Portfolio Infrastructure Management$(NC)"
-	@echo ""
-	@echo "Available targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(YELLOW)%-20s$(NC) %s\n", $$1, $$2}'
-	@echo ""
-	@echo "Environment variables:"
-	@echo "  AWS_REGION=$(AWS_REGION)"
-	@echo "  ENVIRONMENT=$(ENVIRONMENT)"
-	@echo "  TEMPLATE_BUCKET=$(TEMPLATE_BUCKET)"
-	@echo "  ARTIFACT_BUCKET=$(ARTIFACT_BUCKET)"
-
-install: ## Install required tools (Rain, CFN Guard, etc.)
-	@echo "$(GREEN)📦 Installing required tools...$(NC)"
-	@if ! command -v rain &> /dev/null; then \
-	    echo "Installing Rain..."; \
-	    curl -L https://github.com/aws-cloudformation/rain/releases/latest/download/rain_darwin_amd64.zip -o /tmp/rain.zip; \
-	    unzip -o /tmp/rain.zip -d /tmp; \
-	    sudo mv /tmp/rain /usr/local/bin/; \
-	    rm /tmp/rain.zip; \
-	fi
-	@if ! command -v cfn-guard &> /dev/null; then \
-	    echo "Installing CFN Guard..."; \
-	    brew install aws/tap/cfn-guard || ( \
-	        curl -L https://github.com/aws-cloudformation/cloudformation-guard/releases/latest/download/cfn-guard-v3-macos-latest.tar.gz -o /tmp/cfn-guard.tar.gz; \
-	        tar -xzf /tmp/cfn-guard.tar.gz -C /tmp; \
-	        sudo mv /tmp/cfn-guard /usr/local/bin/; \
-	        rm /tmp/cfn-guard.tar.gz \
-	    ); \
-	fi
-	@if ! command -v yamllint &> /dev/null; then \
-	    echo "Installing yamllint..."; \
-	    pip3 install yamllint; \
-	fi
-	@if ! command -v cfn-lint &> /dev/null; then \
-	    echo "Installing cfn-lint..."; \
-	    pip3 install cfn-lint; \
-	fi
-	@echo "$(GREEN)✅ All tools installed successfully!$(NC)"
-
-lint: ## Run YAML and CloudFormation linting
-	@echo "$(GREEN)🔍 Running linting checks...$(NC)"
-	@yamllint infra/ || echo "$(RED)❌ YAML linting failed$(NC)"
-	@cfn-lint infra/**/*.yml || echo "$(RED)❌ CloudFormation linting failed$(NC)"
-	@echo "$(GREEN)✅ Linting completed!$(NC)"
-
-validate: ## Validate all CloudFormation templates with Rain
-	@echo "$(GREEN)🔍 Validating templates with Rain...$(NC)"
-	@for template in $$(find infra -name "*.yml" -type f); do \
-	    echo "Validating: $$template"; \
-	    rain fmt --verify "$$template" || exit 1; \
-	done
-	@echo "$(GREEN)✅ All templates validated successfully!$(NC)"
-
-security-check: ## Run security validation with CFN Guard
-	@echo "$(GREEN)🛡️  Running security checks with CFN Guard...$(NC)"
-	@mkdir -p reports/guard-results
-	@for template in $$(find infra -name "*.yml" -type f); do \
-	    echo "🔍 Security check: $$template"; \
-	    cfn-guard validate \
-	        --data "$$template" \
-	        --rules cfn-guard/rules/ \
-	        --output-format json \
-	        --show-summary \
-	        > "reports/guard-results/$$(basename "$$template" .yml)-security.json" 2>&1 || \
-	        echo "$(YELLOW)⚠️  Security issues found in $$template - check reports/guard-results/$(NC)"; \
-	done
-	@echo "$(GREEN)🛡️  Security validation completed! Check reports/ for details$(NC)"
-
-format: ## Format CloudFormation templates with Rain
-	@echo "$(GREEN)🎨 Formatting templates...$(NC)"
-	@find infra -name "*.yml" -exec rain fmt {} \;
-	@echo "$(GREEN)✅ Templates formatted!$(NC)"
-
-upload-templates: ## Upload templates to S3
-	@echo "$(GREEN)☁️  Uploading templates to S3...$(NC)"
-	@aws s3 sync infra/ s3://$(TEMPLATE_BUCKET)/infra/ \
-	    --exclude "*.md" \
-	    --exclude ".git/*" \
-	    --delete \
-	    --region $(AWS_REGION)
-	@echo "$(GREEN)✅ Templates uploaded to s3://$(TEMPLATE_BUCKET)/infra/$(NC)"
-
-validate-aws: upload-templates ## Validate templates with AWS CloudFormation
-	@echo "$(GREEN)☁️  Validating templates with AWS CloudFormation...$(NC)"
-	@aws cloudformation validate-template \
-	    --template-url https://$(TEMPLATE_BUCKET).s3.$(AWS_REGION).amazonaws.com/infra/MasterNestedStack.yml \
-	    --region $(AWS_REGION)
-	@echo "$(GREEN)✅ AWS validation completed!$(NC)"
-
-preview: upload-templates ## Preview stack changes with Rain
-	@echo "$(GREEN)🔮 Previewing stack changes...$(NC)"
-	@rain forecast infra/MasterNestedStack.yml --params \
-	    Environment=$(ENVIRONMENT),\
-	    TemplateBucket=$(TEMPLATE_BUCKET),\
-	    TemplatePrefix=infra/,\
-	    ArtifactBucket=$(ARTIFACT_BUCKET)
-
-deploy-infra: validate upload-templates ## Deploy infrastructure stack
-	@echo "$(GREEN)🚀 Deploying infrastructure...$(NC)"
-	@aws cloudformation deploy \
-	    --template-file infra/MasterNestedStack.yml \
-	    --stack-name PortfolioMasterStack \
-	    --parameter-overrides \
-	        Environment=$(ENVIRONMENT) \
-	        TemplateBucket=$(TEMPLATE_BUCKET) \
-	        TemplatePrefix="infra/" \
-	        ArtifactBucket=$(ARTIFACT_BUCKET) \
-	        Region=$(AWS_REGION) \
-	    --capabilities CAPABILITY_NAMED_IAM \
-	    --region $(AWS_REGION) \
-	    --tags \
-	        Project=Portfolio \
-	        Environment=$(ENVIRONMENT) \
-	        ManagedBy=Makefile
-	@echo "$(GREEN)✅ Infrastructure deployed successfully!$(NC)"
-
-deploy-rain: validate upload-templates ## Deploy with Rain (alternative method)
-	@echo "$(GREEN)🌧️  Deploying with Rain...$(NC)"
-	@rain deploy infra/MasterNestedStack.yml PortfolioMasterStack \
-	    --params \
-	    Environment=$(ENVIRONMENT),\
-	    TemplateBucket=$(TEMPLATE_BUCKET),\
-	    TemplatePrefix=infra/,\
-	    ArtifactBucket=$(ARTIFACT_BUCKET),\
-	    Region=$(AWS_REGION) \
-	    --yes
-	@echo "$(GREEN)✅ Rain deployment completed!$(NC)"
-
-status: ## Check stack status
-	@echo "$(GREEN)📊 Checking stack status...$(NC)"
-	@aws cloudformation describe-stacks \
-	    --stack-name PortfolioMasterStack \
-	    --region $(AWS_REGION) \
-	    --query 'Stacks[0].{Status:StackStatus,LastUpdated:LastUpdatedTime}' \
-	    --output table || echo "$(RED)❌ Stack not found$(NC)"
-
-logs: ## Show recent stack events
-	@echo "$(GREEN)📋 Recent stack events...$(NC)"
-	@aws cloudformation describe-stack-events \
-	    --stack-name PortfolioMasterStack \
-	    --region $(AWS_REGION) \
-	    --query 'StackEvents[0:10].[Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
-	    --output table || echo "$(RED)❌ Stack not found$(NC)"
-
-outputs: ## Show stack outputs
-	@echo "$(GREEN)📤 Stack outputs...$(NC)"
-	@aws cloudformation describe-stacks \
-	    --stack-name PortfolioMasterStack \
-	    --region $(AWS_REGION) \
-	    --query 'Stacks[0].Outputs' \
-	    --output table || echo "$(RED)❌ Stack not found$(NC)"
-
-watch: ## Watch stack deployment in real-time with Rain
-	@echo "$(GREEN)👀 Watching stack events...$(NC)"
-	@rain watch PortfolioMasterStack
-
-delete: ## Delete the entire stack
-	@echo "$(RED)🗑️  Deleting stack...$(NC)"
-	@read -p "Are you sure you want to delete PortfolioMasterStack? [y/N] " confirm && [ "$$confirm" = "y" ]
-	@aws cloudformation delete-stack \
-	    --stack-name PortfolioMasterStack \
-	    --region $(AWS_REGION)
-	@echo "$(YELLOW)⏳ Waiting for stack deletion...$(NC)"
-	@aws cloudformation wait stack-delete-complete \
-	    --stack-name PortfolioMasterStack \
-	    --region $(AWS_REGION)
-	@echo "$(GREEN)✅ Stack deleted successfully!$(NC)"
-
-clean: ## Clean up local artifacts and reports
-	@echo "$(GREEN)🧹 Cleaning up...$(NC)"
-	@rm -rf reports/
-	@rm -rf .rain/
-	@echo "$(GREEN)✅ Cleanup completed!$(NC)"
-
-doctor: ## Run comprehensive health check
-	@echo "$(GREEN)🩺 Running infrastructure health check...$(NC)"
-	@echo "1. Checking AWS CLI..."
-	@aws sts get-caller-identity --region $(AWS_REGION) > /dev/null && echo "$(GREEN)✅ AWS CLI configured$(NC)" || echo "$(RED)❌ AWS CLI not configured$(NC)"
-	@echo "2. Checking tools..."
-	@command -v rain > /dev/null && echo "$(GREEN)✅ Rain installed$(NC)" || echo "$(RED)❌ Rain not installed$(NC)"
-	@command -v cfn-guard > /dev/null && echo "$(GREEN)✅ CFN Guard installed$(NC)" || echo "$(RED)❌ CFN Guard not installed$(NC)"
-	@echo "3. Checking S3 buckets..."
-	@aws s3 ls s3://$(TEMPLATE_BUCKET) --region $(AWS_REGION) > /dev/null 2>&1 && echo "$(GREEN)✅ Template bucket accessible$(NC)" || echo "$(RED)❌ Template bucket not accessible$(NC)"
-	@aws s3 ls s3://$(ARTIFACT_BUCKET) --region $(AWS_REGION) > /dev/null 2>&1 && echo "$(GREEN)✅ Artifact bucket accessible$(NC)" || echo "$(RED)❌ Artifact bucket not accessible$(NC)"
-	@echo "4. Checking stack status..."
-	@aws cloudformation describe-stacks --stack-name PortfolioMasterStack --region $(AWS_REGION) > /dev/null 2>&1 && echo "$(GREEN)✅ Stack exists$(NC)" || echo "$(YELLOW)⚠️  Stack not deployed$(NC)"
-
-pre-commit: lint validate security-check ## Run all pre-commit checks
-	@echo "$(GREEN)✅ All pre-commit checks passed!$(NC)"
-
-ci-validate: lint validate security-check ## CI validation (no AWS deployment)
-	@echo "$(GREEN)✅ CI validation completed!$(NC)"
-
-cd-deploy: ci-validate deploy-infra ## CD deployment (full pipeline)
-	@echo "$(GREEN)✅ CD deployment completed!$(NC)"
-
-dev: format validate preview ## Development workflow (format, validate, preview)
-	@echo "$(GREEN)✅ Development checks completed!$(NC)"
-
-prod: ## Deploy to production (requires confirmation)
-	@echo "$(RED)🚨 Production deployment$(NC)"
-	@read -p "Are you sure you want to deploy to production? [y/N] " confirm && [ "$$confirm" = "y" ]
-	@$(MAKE) ENVIRONMENT=prod deploy-infra
-
-quick-deploy: format upload-templates deploy-infra ## Quick development deployment
-	@echo "$(GREEN)⚡ Quick deployment completed!$(NC)"

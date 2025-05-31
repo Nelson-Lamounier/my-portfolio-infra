@@ -1,0 +1,160 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Launch Template for ECS EC2 Instances
+
+Parameters:
+  ECSAMI:
+    Description: Amazon Machine Image ID for ECS-optimized instances
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
+
+  ECSClusterNameParam:
+    Description: Name of the target ECS cluster for instance registration
+    Type: String
+
+  Environment:
+    Type: String
+    Description: Environment name for resource naming and tagging
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+  CidrIp:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: CIDR block for SSH access (use specific IP for security)
+
+  KeyPairName:
+    Type: String
+    Description: EC2 Key Pair name for SSH access
+    Default: "freelancer-key-pair"
+
+  ECSInstanceType:
+    Type: String
+    Description: EC2 instance type for ECS instances
+    Default: t3.large
+
+Resources:
+  # IAM Role for EC2 instances
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ECS-InstanceRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: !Sub "ECS-InstanceRole-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Instance Profile
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "ECS-InstanceProfile-${Environment}"
+      Roles:
+        - !Ref ECSInstanceRole
+
+  # Security Group for EC2 instances (NOT for ECS tasks)
+  EC2InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "EC2-InstanceSG-${Environment}"
+      GroupDescription: Security group for ECS EC2 instances
+      VpcId: !ImportValue 
+        Fn::Sub: "VPC-${Environment}"
+      SecurityGroupIngress:
+        # SSH access for administration
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref CidrIp
+          Description: "SSH access for administration"
+        
+        # Dynamic port range for ECS tasks
+        - IpProtocol: tcp
+          FromPort: 32768
+          ToPort: 65535
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description: "Dynamic ports for ECS tasks from ALB"
+      
+      SecurityGroupEgress:
+        # All outbound traffic (for updates, ECR pulls, etc.)
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "All outbound traffic"
+      
+      Tags:
+        - Key: Name
+          Value: !Sub "EC2-InstanceSG-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Launch Template
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "ECS-LaunchTemplate-${Environment}"
+      LaunchTemplateData:
+        InstanceType: !Ref ECSInstanceType 
+        ImageId: !Ref ECSAMI
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref EC2InstanceSecurityGroup
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash
+            # Configure ECS agent
+            echo ECS_CLUSTER=${ECSClusterNameParam} >> /etc/ecs/ecs.config
+            echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
+            
+            # Update system
+            yum update -y
+            
+            # Install CloudWatch agent
+            yum install -y amazon-cloudwatch-agent
+            
+            # Start ECS agent
+            systemctl enable ecs
+            systemctl start ecs
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "ECS-Instance-${Environment}"
+              - Key: Environment
+                Value: !Ref Environment
+
+Outputs:
+  LaunchTemplateId:
+    Description: ID of the created launch template
+    Value: !Ref LaunchTemplate
+    Export:
+      Name: !Sub "LaunchTemplateId-${Environment}"
+
+  LaunchTemplateVersion:
+    Description: Version number of the launch template
+    Value: !GetAtt LaunchTemplate.LatestVersionNumber
+    Export:
+      Name: !Sub "LaunchTemplateVersion-${Environment}"
+
+  EC2InstanceSecurityGroupId:
+    Description: ID of the EC2 instance security group
+    Value: !Ref EC2InstanceSecurityGroup
+    Export:
+      Name: !Sub "EC2InstanceSGId-${Environment}"

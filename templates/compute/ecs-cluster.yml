@@ -1,0 +1,51 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ECS Cluster for Portfolio Infrastructure
+
+Parameters:
+  ECSClusterNameParam:
+    Type: String
+    Description: Name of the ECS cluster
+    Default: "PortfolioCluster"
+  
+  Environment:
+    Type: String
+    Description: Environment name for resource naming and isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${ECSClusterNameParam}-${Environment}"
+      CapacityProviders:
+        - EC2
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: EC2
+          Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: !If
+            - !Equals [!Ref Environment, "production"]
+            - enabled
+            - disabled
+      Tags:
+        - Key: Name
+          Value: !Sub "${ECSClusterNameParam}-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ECSClusterName:
+    Description: Name of the ECS cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub "ECSClusterName-${Environment}"
+  
+  ECSClusterArn:
+    Description: ARN of the ECS cluster
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub "ECSClusterArn-${Environment}"

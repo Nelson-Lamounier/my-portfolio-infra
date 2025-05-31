@@ -1,6 +1,6 @@
 # @format
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: |
   Reusable CodeBuild IAM Role and Policies Template
 
@@ -12,24 +12,26 @@ Description: |
 
 Parameters:
   ArtifactBucket:
-    Type: String
     Description: |
       S3 bucket name where CodePipeline stores build artifacts and intermediate files.
       This bucket is shared across all pipeline stages for artifact passing.
+    Type: String
 
   ProjectName:
-    Type: String
     Description: |
       Unique identifier for the project (e.g., 'Portfolio', 'Project1', 'Project2').
       Used to create unique role names and avoid conflicts when deploying multiple pipelines.
       Should match the naming convention used in your service stacks.
+    Type: String
 
 Resources:
   CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
+
       # Create unique role name to prevent conflicts between different project pipelines
       RoleName: !Sub ${ProjectName}-CodeBuildRole
+
       # Trust policy: Allow CodeBuild service to assume this role during build execution
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -38,13 +40,17 @@ Resources:
             Principal:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
+
       # AWS managed policies for common CodeBuild operations
       ManagedPolicyArns:
+
         # Provides full access to ECR for Docker image operations (push/pull/tag)
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
         # Provides CodeBuild service permissions for builds, logs, and VPC operations
         - arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess
       Policies:
+
         # S3 Access Policy: Enables CodeBuild to read source code and store build artifacts
         - PolicyName: S3AccessPolicy
           PolicyDocument:
@@ -56,6 +62,7 @@ Resources:
                   - s3:PutObject # Upload build artifacts to S3# Upload build artifacts (like imagedefinitions.json)
                   - s3:ListBucket # List bucket contents for artifact discovery
                 Resource:
+
                   # Grant access to the specific artifact bucket and all objects within it
                   - !Sub arn:aws:s3:::${ArtifactBucket}
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
@@ -70,8 +77,9 @@ Resources:
                   - logs:CreateLogGroup # Create log groups for build projects
                   - logs:CreateLogStream # Create individual log streams for each build
                   - logs:PutLogEvents # Write build logs and error messages
+
                 # Allow access to all CloudWatch logs (CodeBuild manages log group naming)
-                Resource: "*"
+                Resource: '*'
 
         # SSM Parameter Store Policy: Secure access to sensitive configuration values
         - PolicyName: SSMParameterPolicy
@@ -84,9 +92,11 @@ Resources:
                   - ssm:GetParameters # Retrieve multiple parameters in batch
                   - kms:Decrypt # Decrypt SecureString parameters encrypted with KMS
                 Resource:
+
                   # Specific parameters needed for source control and container registry access
                   # GitHub token: For accessing private repositories during source checkout
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
+
                   # DockerHub credentials: For pulling base images from DockerHub (if needed)
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dockerhub/password
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dockerhub/username
@@ -100,28 +110,7 @@ Outputs:
       The role ARN is exported with a unique name to prevent conflicts between projects.
     Value: !GetAtt CodeBuildRole.Arn
     Export:
+
       # Export with project-specific name for use in other stacks
       # Format: {ProjectName}-CodeBuildRoleArn (e.g., Portfolio-CodeBuildRoleArn)
       Name: Portfolio-CodeBuildRoleArn
-# Template Usage Notes:
-#
-# 1. Security Considerations:
-#    - Role follows principle of least privilege
-#    - SSM parameters are scoped to specific paths
-#    - S3 access limited to designated artifact bucket
-#    - KMS decrypt permission needed for SecureString parameters
-#
-# 2. Deployment Dependencies:
-#    - SSM parameters must exist before stack deployment
-#    - Artifact bucket must be created before this role
-#    - ECR repositories should exist before CodeBuild runs
-#
-# 3. Maintenance:
-#    - Update parameter ARNs if SSM structure changes
-#    - Review managed policy changes during AWS updates
-#    - Monitor CloudTrail for permission usage and optimization opportunities
-#
-# 4. Troubleshooting:
-#    - Check CloudWatch logs if builds fail with permission errors
-#    - Verify SSM parameter names match exactly (case-sensitive)
-#    - Ensure KMS key policies allow this role to decrypt if using custom keys

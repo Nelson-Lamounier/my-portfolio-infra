@@ -1,0 +1,233 @@
+# @format
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: |
+  Ultra-Dynamic Route 53 DNS Configuration for Portfolio Infrastructure
+
+  This template uses AWS CloudFormation transforms to dynamically create
+  DNS alias records based on domain configuration arrays, eliminating
+  code duplication entirely while supporting environment-specific setups.
+
+  DNS Architecture:
+  - Environment-isolated DNS records (dev/staging/production)
+  - Single ALB serves all domains with host-based routing
+  - Automatic DNS record creation from configuration array
+  - Route 53 alias records for optimal performance and cost
+
+Parameters:
+  # Environment Parameter
+  Environment:
+    Type: String
+    Description: Environment name for resource naming and DNS isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+  # Route 53 Configuration
+  HostedZoneId:
+    Description: |
+      Route 53 Hosted Zone ID for the domain.
+      This hosted zone must already exist and be configured for your domain.
+      Find this ID in the Route 53 console under your domain's hosted zone.
+      Format: Alphanumeric string (e.g., 'Z1D633PJN98FT9')
+    Type: String
+
+  # Dynamic Domain Configuration as JSON Array
+  DomainsConfig:
+    Description: |
+      JSON array of domain configurations. Format:
+      [
+        {
+          "name": "root",
+          "domain": "lamounierdigital.com",
+          "enabled": true,
+          "description": "Main portfolio site"
+        },
+        {
+          "name": "www", 
+          "domain": "www.lamounierdigital.com",
+          "enabled": true,
+          "description": "WWW subdomain"
+        }
+      ]
+    Type: String
+    Default: |
+      [
+        {
+          "name": "root",
+          "domain": "example.com",
+          "enabled": true,
+          "description": "Main portfolio site"
+        }
+      ]
+
+  # Environment-Specific Domain Prefix
+  EnvironmentDomainPrefix:
+    Description: |
+      Optional prefix for environment-specific domains.
+      Examples:
+      - Production: "" (no prefix)
+      - Staging: "staging." 
+      - Development: "dev."
+    Type: String
+    Default: ""
+
+  # TTL Configuration
+  DefaultTTL:
+    Description: Default TTL for DNS records (in seconds)
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 86400
+
+Conditions:
+  # Environment-specific conditions
+  IsProduction: !Equals [!Ref Environment, "production"]
+  IsStaging: !Equals [!Ref Environment, "staging"]
+  IsDevelopment: !Equals [!Ref Environment, "dev"]
+  
+  # Domain prefix conditions
+  HasEnvironmentPrefix: !Not
+    - !Equals
+      - !Ref EnvironmentDomainPrefix
+      - ""
+
+Transform: AWS::LanguageExtensions
+
+Resources:
+  # Dynamic DNS Records using Transform
+  Fn::ForEach::DNSRecords:
+    - DomainConfig
+    - !Ref DomainsConfig
+    - ${DomainConfig.name}DNSRecord:
+        Type: AWS::Route53::RecordSet
+        Condition: !Equals
+          - !Ref ${DomainConfig.enabled}
+          - true
+        Properties:
+          HostedZoneId: !Ref HostedZoneId
+          # Dynamic domain name with optional environment prefix
+          Name: !If
+            - HasEnvironmentPrefix
+            - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+            - !Ref ${DomainConfig.domain}
+          Type: A
+          # Environment-specific TTL
+          SetIdentifier: !Sub "${Environment}-${DomainConfig.name}"
+          Weight: 100
+          AliasTarget:
+            # Environment-specific ALB import
+            DNSName: !ImportValue 
+              Fn::Sub: "LoadBalancerDNSName-${Environment}"
+            HostedZoneId: !ImportValue 
+              Fn::Sub: "LoadBalancerCanonicalHostedZoneID-${Environment}"
+            EvaluateTargetHealth: true
+          # Add comment for identification
+          Comment: !Sub "${Environment} - ${DomainConfig.description}"
+
+  # Health Check for Production (Optional)
+  Fn::ForEach::HealthChecks:
+    - DomainConfig
+    - !If
+      - IsProduction
+      - !Ref DomainsConfig
+      - []
+    - ${DomainConfig.name}HealthCheck:
+        Type: AWS::Route53::HealthCheck
+        Condition: !And
+          - !Equals
+            - !Ref ${DomainConfig.enabled}
+            - true
+          - IsProduction
+        Properties:
+          Type: HTTPS
+          ResourcePath: /health
+          FullyQualifiedDomainName: !If
+            - HasEnvironmentPrefix
+            - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+            - !Ref ${DomainConfig.domain}
+          Port: 443
+          RequestInterval: 30
+          FailureThreshold: 3
+          Tags:
+            - Key: Name
+              Value: !Sub "${Environment}-${DomainConfig.name}-HealthCheck"
+            - Key: Environment
+              Value: !Ref Environment
+            - Key: Domain
+              Value: !Ref ${DomainConfig.domain}
+
+  # AAAA Records for IPv6 (Optional)
+  Fn::ForEach::IPv6Records:
+    - DomainConfig
+    - !If
+      - IsProduction
+      - !Ref DomainsConfig
+      - []
+    - ${DomainConfig.name}IPv6Record:
+        Type: AWS::Route53::RecordSet
+        Condition: !And
+          - !Equals
+            - !Ref ${DomainConfig.enabled}
+            - true
+          - IsProduction
+        Properties:
+          HostedZoneId: !Ref HostedZoneId
+          Name: !If
+            - HasEnvironmentPrefix
+            - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+            - !Ref ${DomainConfig.domain}
+          Type: AAAA
+          SetIdentifier: !Sub "${Environment}-${DomainConfig.name}-ipv6"
+          Weight: 100
+          AliasTarget:
+            DNSName: !ImportValue 
+              Fn::Sub: "LoadBalancerDNSName-${Environment}"
+            HostedZoneId: !ImportValue 
+              Fn::Sub: "LoadBalancerCanonicalHostedZoneID-${Environment}"
+            EvaluateTargetHealth: true
+
+Outputs:
+  # Dynamic DNS Record Outputs
+  Fn::ForEach::DNSOutputs:
+    - DomainConfig
+    - !Ref DomainsConfig
+    - ${DomainConfig.name}DNSName:
+        Condition: !Equals
+          - !Ref ${DomainConfig.enabled}
+          - true
+        Description: !Sub "DNS name for ${DomainConfig.name} domain"
+        Value: !If
+          - HasEnvironmentPrefix
+          - !Sub "${EnvironmentDomainPrefix}${DomainConfig.domain}"
+          - !Ref ${DomainConfig.domain}
+        Export:
+          Name: !Sub "${DomainConfig.name}DNSName-${Environment}"
+
+  # Environment-specific outputs
+  EnvironmentInfo:
+    Description: Environment-specific DNS configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Domain Prefix: ${EnvironmentDomainPrefix}
+      Hosted Zone: ${HostedZoneId}
+      ALB Import: LoadBalancerDNSName-${Environment}
+    Export:
+      Name: !Sub "DNSEnvironmentInfo-${Environment}"
+
+  # Health check outputs (Production only)
+  Fn::ForEach::HealthCheckOutputs:
+    - DomainConfig
+    - !If
+      - IsProduction
+      - !Ref DomainsConfig
+      - []
+    - ${DomainConfig.name}HealthCheckId:
+        Condition: !And
+          - !Equals
+            - !Ref ${DomainConfig.enabled}
+            - true
+          - IsProduction
+        Description: !Sub "Health Check ID for ${DomainConfig.name} domain"
+        Value: !Ref ${DomainConfig.name}HealthCheck
+        Export:
+          Name: !Sub "${DomainConfig.name}HealthCheckId-${Environment}"

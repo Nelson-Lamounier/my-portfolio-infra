@@ -1,0 +1,28 @@
+# Compute Security Rules
+let auto_scaling_groups = Resources.*[ Type == "AWS::AutoScaling::AutoScalingGroup" ]
+let launch_templates = Resources.*[ Type == "AWS::EC2::LaunchTemplate" ]
+
+# ASG-specific rules for your auto-scaling-group.yml
+rule ASG_MINIMUM_INSTANCES {
+    %auto_scaling_groups {
+        Properties.MinSize >= 1
+        <<Auto Scaling Group should have minimum of 1 instance for availability>>
+    }
+}
+
+rule ASG_HEALTH_CHECK_GRACE_PERIOD {
+    %auto_scaling_groups {
+        Properties.HealthCheckGracePeriod >= 300
+        Properties.HealthCheckGracePeriod <= 600
+        <<Health check grace period should be between 5-10 minutes>>
+    }
+}
+
+rule ASG_MULTI_AZ_DEPLOYMENT {
+    %auto_scaling_groups {
+        Properties.VPCZoneIdentifier exists
+        Properties.VPCZoneIdentifier is_list
+        Properties.VPCZoneIdentifier[1] exists
+        <<Auto Scaling Group should span multiple AZs for high availability>>
+    }
+}

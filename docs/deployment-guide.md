@@ -500,3 +500,21 @@ tree my-portfolio-infra -I 'node_modules|.git|\*.log'
 ls -la my-portfolio-infra/
 ls -la my-portfolio-infra/infra/
 ls -la my-portfolio-infra/infra/\*/
+
+# Complete testing and deployment workflow
+
+make test-all # Run all validations
+make deploy # Deploy if tests pass
+
+# Individual steps
+
+make syntax-check # Quick YAML validation
+make validate # CFN-Guard security rules
+make lint # Rain formatting check
+make deploy-dry # Test deployment without resources
+
+# Monitoring
+
+make monitor # Watch stack status
+make outputs # Show stack outputs
+make events # Show recent events

@@ -1,0 +1,289 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: VPC with public subnets and internet access
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name for resource naming and isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+  VpcCidr:
+    Type: String
+    Description: CIDR block for VPC
+    Default: "10.0.0.0/16"
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
+
+  EnableVpcFlowLogs:
+    Type: String
+    Description: Enable VPC Flow Logs
+    Default: "true"
+    AllowedValues: ["true", "false"]
+
+Conditions:
+  EnableFlowLogs: !Equals [!Ref EnableVpcFlowLogs, "true"]
+  IsProduction: !Equals [!Ref Environment, "production"]
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-VPC-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # VPC Flow Logs (conditional - enabled in production, optional in dev)
+  FlowLogRole:
+    Type: AWS::IAM::Role
+    Condition: EnableFlowLogs
+    Properties:
+      RoleName: !Sub "VPC-FlowLogRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub "FlowLogsToCloudWatch-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: 
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/vpc/flowlogs-${Environment}"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/vpc/flowlogs-${Environment}:*"
+      Tags:
+        - Key: Name
+          Value: !Sub "VPC-FlowLogRole-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  FlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: EnableFlowLogs
+    Properties:
+      LogGroupName: !Sub "/vpc/flowlogs-${Environment}"
+      RetentionInDays: !If
+        - IsProduction
+        - 30
+        - 7
+
+  FlowLogs:
+    Type: AWS::EC2::FlowLog
+    Condition: EnableFlowLogs
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt FlowLogRole.Arn
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref FlowLogGroup
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      Tags:
+        - Key: Name
+          Value: !Sub "VPC-FlowLogs-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-IGW-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnets with dynamic CIDR calculation
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]  # First /24 subnet
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-PublicSubnet1-${Environment}"
+        - Key: Type
+          Value: Public
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]  # Second /24 subnet
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-PublicSubnet2-${Environment}"
+        - Key: Type
+          Value: Public
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Private Subnets (for future use with RDS, etc.)
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 4, 8]]  # Third /24 subnet
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-PrivateSubnet1-${Environment}"
+        - Key: Type
+          Value: Private
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 4, 8]]  # Fourth /24 subnet
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-PrivateSubnet2-${Environment}"
+        - Key: Type
+          Value: Private
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-PublicRT-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "Portfolio-PrivateRT-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Routes
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Route Table Associations
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+Outputs:
+  VPC:
+    Description: The VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "VPC-${Environment}"
+
+  VpcCidr:
+    Description: The VPC CIDR block
+    Value: !Ref VpcCidr
+    Export:
+      Name: !Sub "VpcCidr-${Environment}"
+
+  PublicSubnet1:
+    Description: First public subnet
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub "PublicSubnet1-${Environment}"
+
+  PublicSubnet2:
+    Description: Second public subnet
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub "PublicSubnet2-${Environment}"
+
+  PrivateSubnet1:
+    Description: First private subnet
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub "PrivateSubnet1-${Environment}"
+
+  PrivateSubnet2:
+    Description: Second private subnet
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub "PrivateSubnet2-${Environment}"
+
+  InternetGateway:
+    Description: Internet Gateway ID
+    Value: !Ref InternetGateway
+    Export:
+      Name: !Sub "InternetGateway-${Environment}"
+
+  PublicRouteTable:
+    Description: Public Route Table ID
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub "PublicRouteTable-${Environment}"
+
+  PrivateRouteTable:
+    Description: Private Route Table ID
+    Value: !Ref PrivateRouteTable
+    Export:
+      Name: !Sub "PrivateRouteTable-${Environment}"

@@ -1,3 +1,39 @@
-# .gitignore
-
+# Environment files
 .env
+.env.example
+
+
+
+# AWS credentials
+.aws/
+
+# IDE files
+.vscode/settings.json
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Rain cache
+.rain/
+
+# Reports
+reports/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+build/
+dist/
+node_modules/
+
+config/
+parameters/

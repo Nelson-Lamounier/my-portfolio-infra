@@ -141,6 +141,31 @@ Parameters:
     Description: ECR repository name for Project 2
     Default: backend-ecomm-dev
 
+    PortfolioHealthCheckPath:
+    Type: String
+    Description: Health check path for portfolio service
+    Default: "/"
+  
+  Project1HealthCheckPath:
+    Type: String
+    Description: Health check path for project1 service
+    Default: "/healthcheck"
+  
+  Project2HealthCheckPath:
+    Type: String
+    Description: Health check path for project2 service
+    Default: "/api/health"
+  
+  EcommerceFrontendHealthCheckPath:
+    Type: String
+    Description: Health check path for ecommerce frontend service
+    Default: "/health"
+  
+  EcommerceBackendHealthCheckPath:
+    Type: String
+    Description: Health check path for ecommerce backend service
+    Default: "/api/health"
+
   MigrationMode:
     Type: String
     Description: Migration mode for Project 1
@@ -150,11 +175,36 @@ Parameters:
     Default: migrate
     ConstraintDescription: Must be either 'migrate' or 'no-migrate'
 
+  ECSInstanceType:
+    Type: String
+    Description: EC2 instance type for ECS cluster
+    Default: t3.large
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+
+  # Add VPC CIDR parameter
+  VpcCidr:
+    Type: String
+    Description: CIDR block for VPC
+    Default: "10.0.0.0/16"
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+
 Resources:
   VPCStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}VPC.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}core/vpc.yml
+      Parameters:
+        Environment: !Ref Environment
+        VpcCidr: !Ref VpcCidr
+        EnableVpcFlowLogs: !If
+          - !Equals [!Ref Environment, "production"]
+          - "true"
+          - "false"
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -173,7 +223,60 @@ Resources:
       - VPCStack
       - CertificateStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LoadBalancer.yml
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}networking/application-load-balancer.yml"
+      Parameters:
+        Environment: !Ref Environment
+        LoadBalancerName: !Sub "Portfolio-ALB-${Environment}"
+        LoadBalancerSGCidrIp: "0.0.0.0/0"
+        SSLCertificateArn: !GetAtt CertificateStack.Outputs.CertificateArn
+        EnableHTTPS: "true"
+        ServicesConfig: !Sub |
+          [
+            {
+              "name": "portfolio",
+              "port": 80,
+              "domains": ["${RootDomainName}", "${WWWDomainName}"],
+              "priority": 100,
+              "enabled": true,
+              "healthCheckPath": "${PortfolioHealthCheckPath}"
+            },
+            {
+              "name": "project1",
+              "port": 3000,
+              "domains": ["${Project1Domain}"],
+              "priority": 200,
+              "enabled": true,
+              "healthCheckPath": "${Project1HealthCheckPath}"
+            },
+            {
+              "name": "project2",
+              "port": 3001,
+              "domains": ["${Project2Domain}"],
+              "priority": 300,
+              "enabled": true,
+              "healthCheckPath": "${Project2HealthCheckPath}"
+            },
+            {
+              "name": "ecommerce-frontend",
+              "port": 3002,
+              "domains": ["${ProjectFrontendEcommDomain}"],
+              "priority": 400,
+              "enabled": true,
+              "healthCheckPath": "${EcommerceFrontendHealthCheckPath}"
+            },
+            {
+              "name": "ecommerce-backend",
+              "port": 4000,
+              "domains": ["${ProjectBackendEcommDomain}"],
+              "priority": 500,
+              "enabled": true,
+              "healthCheckPath": "${EcommerceBackendHealthCheckPath}"
+            }
+          ]
+        HealthCheckPath: "/"
+        HealthCheckIntervalSeconds: 30
+        HealthyThresholdCount: 2
+        UnhealthyThresholdCount: 3
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -188,30 +291,17 @@ Resources:
 
   LaunchTemplateStack:
     Type: AWS::CloudFormation::Stack
-    DependsOn: ECSClusterStack
+    DependsOn: 
+      - VPCStack
+      - LoadBalancerStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}LaunchTemplate.yml
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/launch-template.yml
       Parameters:
         ECSClusterNameParam: !Ref ECSClusterNameParam
         PublicSubnetId: !GetAtt VPCStack.Outputs.PublicSubnet1
         CidrIp: !Ref CidrIp
-
-  ECSClusterStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: LoadBalancerStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}ECSCluster.yml
+        ECSInstanceType: !Ref ECSInstanceType 
+        KeyPairName: "freelancer-key-pair"
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -223,19 +313,82 @@ Resources:
           Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
+
+
+  ECSClusterStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: VPCStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-cluster.yml
       Parameters:
         ECSClusterNameParam: !Ref ECSClusterNameParam
+        Environment: !Ref Environment
         Region: !Ref Region
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Update ECS Roles Stack
+  ECSRolesStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-roles.yml
+      Parameters:
+        Environment: !Ref Environment
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+
+    # Update ECS Security Groups Stack
+  ECSSecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VPCStack
+      - LoadBalancerStack
+    Properties:
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-security-groups.yml
+      Parameters:
+        Environment: !Ref Environment
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
 
   ServiceStack:
     Type: AWS::CloudFormation::Stack
     DependsOn:
       - ECSClusterStack
+      - ECSRolesStack
+      - ECSSecurityGroupsStack
       - LoadBalancerStack
       - AutoScalingStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
       Parameters:
+        Environment: !Ref Environment
         ProjectName: Portfolio
         ServiceName: portfolio-service
         ContainerName: !Ref PortfolioContainerName
@@ -244,7 +397,10 @@ Resources:
         HostPort: 0
         CPU: 256
         Memory: 512
-        DesiredCount: 1
+        DesiredCount: !If
+          - !Equals [!Ref Environment, "production"]
+          - 2
+          - 1
         TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.TargetGroupArn
         Region: !Ref Region
         MigrationMode: !Ref MigrationMode
@@ -268,7 +424,7 @@ Resources:
       - LoadBalancerStack
       - AutoScalingStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
       Parameters:
         ProjectName: Project1
         ServiceName: project1-service
@@ -302,7 +458,7 @@ Resources:
       - LoadBalancerStack
       - AutoScalingStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
       Parameters:
         ProjectName: Project2
         ServiceName: project2-service
@@ -336,7 +492,7 @@ Resources:
       - LoadBalancerStack
       - AutoScalingStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}services/DynamicService.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
       Parameters:
         ProjectName: ProjectFullStack
         ServiceName: fullstack-ecomm-service
@@ -381,7 +537,21 @@ Resources:
       - ECSClusterStack
       - VPCStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}AutoScalingGroup.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/auto-scalling-group.yml
+      Parameters:
+        Environment: !Ref Environment
+        MinSize: !If
+          - !Equals [!Ref Environment, "production"]
+          - 2
+          - 1
+        MaxSize: !If
+          - !Equals [!Ref Environment, "production"]
+          - 6
+          - 3
+        DesiredCapacity: !If
+          - !Equals [!Ref Environment, "production"]
+          - 2
+          - 1
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -398,15 +568,58 @@ Resources:
     Type: AWS::CloudFormation::Stack
     DependsOn: LoadBalancerStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}dns.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/dns-records.yml
       Parameters:
-        RootDomainName: !Ref RootDomainName
-        WWWDomainName: !Ref WWWDomainName
-        Project1Domain: !Ref Project1Domain
-        Project2Domain: !Ref Project2Domain
-        ProjectFrontendEcommDomain: !Ref ProjectFrontendEcommDomain
-        ProjectBackendEcommDomain: !Ref ProjectBackendEcommDomain
+        Environment: !Ref Environment
         HostedZoneId: !Ref HostedZoneId
+        # Environment-specific domain prefix
+        EnvironmentDomainPrefix: !If
+          - !Equals [!Ref Environment, "production"]
+          - ""  # No prefix for production
+          - !Sub "${Environment}."  # dev., staging. prefix
+        DefaultTTL: !If
+          - !Equals [!Ref Environment, "production"]
+          - 300   # 5 minutes for production
+          - 60    # 1 minute for dev/staging (faster updates)
+        DomainsConfig: !Sub |
+          [
+            {
+              "name": "root",
+              "domain": "${RootDomainName}",
+              "enabled": true,
+              "description": "Main portfolio site"
+            },
+            {
+              "name": "www",
+              "domain": "${WWWDomainName}",
+              "enabled": true,
+              "description": "WWW subdomain"
+            },
+            {
+              "name": "project1",
+              "domain": "${Project1Domain}",
+              "enabled": true,
+              "description": "Project 1 application"
+            },
+            {
+              "name": "project2", 
+              "domain": "${Project2Domain}",
+              "enabled": true,
+              "description": "Project 2 application"
+            },
+            {
+              "name": "ecomm-frontend",
+              "domain": "${ProjectFrontendEcommDomain}",
+              "enabled": true,
+              "description": "E-commerce frontend"
+            },
+            {
+              "name": "ecomm-backend",
+              "domain": "${ProjectBackendEcommDomain}",
+              "enabled": true,
+              "description": "E-commerce backend API"
+            }
+          ]
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
@@ -422,7 +635,7 @@ Resources:
   CertificateStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}certificate.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/ssl-certificate.yml
       Parameters:
         RootDomainName: !Ref RootDomainName
         WWWDomainName: !Ref WWWDomainName
@@ -447,7 +660,7 @@ Resources:
   CodeBuildPoliciesStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}iam/CodeBuildPolicies.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codebuild-policies.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ProjectName: !FindInMap [TagMap, !Ref Environment, Project]
@@ -466,7 +679,7 @@ Resources:
   CodePipelinePoliciesStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}iam/CodePipelinePolicies.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codepipeline-policies.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ProjectName: !FindInMap [TagMap, !Ref Environment, Project]
@@ -490,7 +703,7 @@ Resources:
       - CodeBuildPoliciesStack #  Pipeline needs CodeBuild IAM role
       - CodePipelinePoliciesStack #  Pipeline needs CodePipeline IAM role
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ServiceName: !GetAtt ServiceStack.Outputs.ECSServiceName
@@ -519,7 +732,7 @@ Resources:
       - CodeBuildPoliciesStack #  Pipeline needs CodeBuild IAM role
       - CodePipelinePoliciesStack #  Pipeline needs CodePipeline IAM role
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ServiceName: !GetAtt Project1ServiceStack.Outputs.ECSServiceName
@@ -548,7 +761,7 @@ Resources:
       - CodeBuildPoliciesStack
       - CodePipelinePoliciesStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ServiceName: !GetAtt Project2ServiceStack.Outputs.ECSServiceName
@@ -577,7 +790,7 @@ Resources:
       - CodeBuildPoliciesStack
       - CodePipelinePoliciesStack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/DynamicPipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
         ServiceName: fullstack-ecomm-service

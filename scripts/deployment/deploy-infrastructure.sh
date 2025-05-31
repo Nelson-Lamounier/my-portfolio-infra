@@ -33,7 +33,12 @@ REQUIRED_VARS=(
   PROJECT3_FRONTEND_DOMAIN PROJECT3_BACKEND_DOMAIN HOSTED_ZONE_ID
   # New variables for dynamic pipelines
   PROJECT1_REPO PROJECT1_CONNECTION_ARN PROJECT1_CONTAINER_NAME PROJECT1_ECR_REPO
-
+  PROJECT2_REPO PROJECT2_CONNECTION_ARN PROJECT2_CONTAINER_NAME PROJECT2_ECR_REPO
+  PROJECT3_REPO PROJECT3_CONNECTION_ARN PROJECT3_CONTAINER_NAME PROJECT3_ECR_REPO
+  PORTFOLIO_REPO PORTFOLIO_CONNECTION_ARN PORTFOLIO_CONTAINER_NAME PORTFOLIO_ECR_REPO
+  # Health check paths
+  PORTFOLIO_HEALTH_CHECK_PATH PROJECT1_HEALTH_CHECK_PATH PROJECT2_HEALTH_CHECK_PATH
+  ECOMMERCE_FRONTEND_HEALTH_CHECK_PATH ECOMMERCE_BACKEND_HEALTH_CHECK_PATH
 )
 
 # Check all required variables are set
@@ -50,68 +55,32 @@ if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
     echo "Bucket exists: $BUCKET_NAME"
 else
     echo "Creating S3 bucket: $BUCKET_NAME"
-    aws s3api create-bucket \
-        --bucket "$BUCKET_NAME" \
-        --region "$REGION" \
-        --create-bucket-configuration LocationConstraint="$REGION"
+    if [ "$REGION" = "us-east-1" ]; then
+        aws s3api create-bucket \
+            --bucket "$BUCKET_NAME" \
+            --region "$REGION"
+    else
+        aws s3api create-bucket \
+            --bucket "$BUCKET_NAME" \
+            --region "$REGION" \
+            --create-bucket-configuration LocationConstraint="$REGION"
+    fi
 fi
 
-# # === STEP 2: Template Validation ===
-# echo "Validating CloudFormation templates..."
-
-# # Validate YAML syntax
-# echo "Checking YAML syntax..."
-# if command -v yamllint &> /dev/null; then
-#     yamllint infra/
-# else
-#     echo "Warning: yamllint not installed. Skipping YAML validation."
-# fi
-
-# # Validate CloudFormation templates
-# echo "Validating CloudFormation templates..."
-# if command -v cfn-lint &> /dev/null; then
-#     cfn-lint infra/MasterNestedStack.yml
-#     cfn-lint infra/pipelines/DynamicPipeline.yml
-#     cfn-lint infra/iam/CodeBuildPolicies.yml
-#     cfn-lint infra/iam/CodePipelinePolicies.yml
-# else
-#     echo "Warning: cfn-lint not installed. Skipping CloudFormation validation."
-# fi
-
-# # AWS CloudFormation validate-template
-# echo "Validating with AWS CloudFormation..."
-# aws cloudformation validate-template \
-#     --template-body file://infra/MasterNestedStack.yml \
-#     --region "$REGION"
-
-# === STEP 3: Upload CloudFormation Templates to S3 ===
+# === STEP 2: Upload CloudFormation Templates to S3 ===
 echo "Syncing templates to S3..."
-aws s3 sync ./infra/ "s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}" \
+aws s3 sync ./templates/ "s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}" \
     --exclude "*" \
     --include "*.yml" \
     --delete \
     --region "$REGION"
 
 echo "Templates uploaded successfully to s3://${BUCKET_NAME}/${TEMPLATE_PREFIX}"
-# # === STEP 3: Fetch Certificate ARN ===
-# echo "Fetching Certificate ARN from us-east-1..."
-# CERT_ARN=$(aws cloudformation describe-stacks \
-#   --stack-name PortfolioCertificateStack \
-#   --region eu-west-1 \
-#   --query "Stacks[0].Outputs[?OutputKey=='SSLCertificateArn'].OutputValue" \
-#   --output text)
 
-# if [[ -z "$CERT_ARN" ]]; then
-#   echo "Certificate not found. Please deploy certificate.yml first."
-#   exit 1
-# fi
-
-# echo "Certificate ARN: $CERT_ARN"
-
-# === STEP 4: Deploy Master Nested Stack ===
+# === STEP 3: Deploy Master Nested Stack ===
 echo "Deploying Master Stack to $REGION..."
 aws cloudformation deploy \
-  --template-file ./infra/MasterNestedStack.yml \
+  --template-file ./templates/main.yml \
   --stack-name "$STACK_NAME" \
   --parameter-overrides \
     TemplateBucket="$BUCKET_NAME" \
@@ -146,6 +115,11 @@ aws cloudformation deploy \
     ProjectFullStackSecondaryContainerName="$PROJECT3_SECONDARY_CONTAINER_NAME" \
     ProjectFullStackECRRepository="$PROJECT3_ECR_REPO" \
     ProjectFullStackSecondaryECRRepository="$PROJECT3_SECONDARY_ECR_REPO" \
+    PortfolioHealthCheckPath="$PORTFOLIO_HEALTH_CHECK_PATH" \
+    Project1HealthCheckPath="$PROJECT1_HEALTH_CHECK_PATH" \
+    Project2HealthCheckPath="$PROJECT2_HEALTH_CHECK_PATH" \
+    EcommerceFrontendHealthCheckPath="$ECOMMERCE_FRONTEND_HEALTH_CHECK_PATH" \
+    EcommerceBackendHealthCheckPath="$ECOMMERCE_BACKEND_HEALTH_CHECK_PATH" \
     MigrationMode="$MIGRATION_MODE" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" \
@@ -153,9 +127,9 @@ aws cloudformation deploy \
 
 echo "Master stack deployment initiated..."
 
-# === STEP 5: Monitor Stack and Cancel If Timeout ===
-echo "⏱️ Monitoring stack for up to 20 minutes..."
-TIMEOUT=1200  # 20 minutes (increased for nested stacks)
+# === STEP 4: Monitor Stack and Cancel If Timeout ===
+echo "⏱️ Monitoring stack for up to 25 minutes..."
+TIMEOUT=1500  # 25 minutes (increased for nested stacks with ALB)
 START_TIME=$(date +%s)
 
 while true; do
@@ -204,7 +178,7 @@ while true; do
   sleep 30
 done
 
-# === STEP 6: Display Stack Outputs ===
+# === STEP 5: Display Stack Outputs ===
 echo "📋 Stack Outputs:"
 aws cloudformation describe-stacks \
   --stack-name "$STACK_NAME" \
@@ -213,4 +187,3 @@ aws cloudformation describe-stacks \
   --output table 2>/dev/null || echo "No outputs available"
 
 echo "🎉 Deployment completed successfully!"
-

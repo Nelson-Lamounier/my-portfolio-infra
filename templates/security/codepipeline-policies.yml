@@ -1,6 +1,6 @@
 # @format
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: |
   Reusable CodePipeline IAM Role and Policies Template
 
@@ -17,40 +17,44 @@ Description: |
 
 Parameters:
   ArtifactBucket:
-    Type: String
     Description: |
       S3 bucket name for storing CodePipeline artifacts between stages.
       This bucket acts as the central storage for source code, build outputs,
       and deployment artifacts as they flow through the pipeline stages.
+    Type: String
 
   ProjectName:
-    Type: String
     Description: |
       Unique project identifier for creating distinct role names across multiple pipelines.
       Examples: 'Portfolio', 'Project1', 'EcommerceApp'
       Used to prevent naming conflicts when deploying multiple pipeline stacks.
+    Type: String
 
   ConnectionArn:
-    Type: String
     Description: |
       ARN of the CodeStar connection for GitHub integration.
       This connection enables secure, token-based authentication between AWS and GitHub
       without storing credentials directly in the pipeline configuration.
       Format: arn:aws:codeconnections:region:account:connection/connection-id
+    Type: String
 
   TaskExecutionRoleArn:
-    Type: String
     Description: |
       ARN of the ECS Task Execution Role. If not provided, will use wildcard permissions.
+    Type: String
     Default: ""
 
 Conditions:
-  HasTaskExecutionRole: !Not [!Equals [!Ref TaskExecutionRoleArn, ""]]
+  HasTaskExecutionRole: !Not
+    - !Equals
+      - !Ref TaskExecutionRoleArn
+      - ""
 
 Resources:
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:
+
       # Unique role naming prevents conflicts between multiple project pipelines
       RoleName: !Sub ${ProjectName}-CodePipelineRole
 
@@ -62,8 +66,8 @@ Resources:
             Principal:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
-
       Policies:
+
         # SSM Parameter Access: Secure retrieval of sensitive configuration values
         - PolicyName: SSMParameterAccess
           PolicyDocument:
@@ -71,9 +75,11 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+
                   # Retrieve GitHub personal access token for repository access
                   - ssm:GetParameter
                 Resource:
+
                   # GitHub token used for repository operations and webhook configuration
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/github/token
 
@@ -88,6 +94,7 @@ Resources:
                   - s3:PutObject # Store artifacts for subsequent stages
                   - s3:ListBucket # Browse bucket contents for artifact discovery
                 Resource:
+
                   # Scoped to specific artifact bucket to follow least privilege principle
                   - !Sub arn:aws:s3:::${ArtifactBucket}
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
@@ -97,9 +104,11 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+
               # Core ECS Operations: Service and task management for deployments
               - Effect: Allow
                 Action:
+
                   # Service Management: Required for updating running applications
                   - ecs:DescribeServices # Check current service status and configuration
                   - ecs:UpdateService # Deploy new task definitions to services
@@ -126,16 +135,19 @@ Resources:
                   - ecs:TagResource # Apply tags to ECS resources
                   - ecs:UntagResource # Remove outdated tags
                   - ecs:ListTagsForResource # Audit current resource tags
+
                 # Global resource access needed due to ECS cross-service dependencies
-                Resource: "*"
+                Resource: '*'
 
               # Auto Scaling Integration: Handle dynamic capacity adjustments
               - Effect: Allow
                 Action:
+
                   # Full auto scaling permissions for ECS service scaling policies
                   - application-autoscaling:*
+
                 # Auto scaling policies can be applied to various resource types
-                Resource: "*"
+                Resource: '*'
 
               # CloudWatch Logs: Monitor deployment process and application logs
               - Effect: Allow
@@ -144,8 +156,9 @@ Resources:
                   - logs:DescribeLogGroups # Verify log group configuration
                   - logs:PutLogEvents # Write deployment events to logs
                   - logs:DescribeLogStreams # Monitor log stream creation and status
+
                 # Log group names are dynamic and managed by ECS service
-                Resource: "*"
+                Resource: '*'
 
               # CodeBuild Integration: Orchestrate build processes within pipeline
               - Effect: Allow
@@ -153,8 +166,9 @@ Resources:
                   - codebuild:StartBuild # Trigger build projects for compilation/testing
                   - codebuild:BatchGetBuilds # Monitor build progress and status
                   - codebuild:BatchGetProjects # Validate build project configuration
+
                 # Build projects may be created dynamically across multiple projects
-                Resource: "*"
+                Resource: '*'
 
         # IAM Role Passing: Enable ECS to use task execution roles for container operations
         - PolicyName: IAMPassRole
@@ -163,14 +177,16 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+
                   # Allow CodePipeline to pass execution roles to ECS tasks
                   - iam:PassRole
                 Resource:
+
                   # Specific task execution role created by ECS cluster infrastructure
                   # This role is used by ECS to pull container images and write logs
-                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*TaskExecutionRole*"
-                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole"
-                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/*-TaskExecutionRole"
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/*TaskExecutionRole*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/ecsTaskExecutionRole
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/*-TaskExecutionRole
 
         # Source Control Integration: Secure access to GitHub repositories
         - PolicyName: SourceAccess
@@ -179,16 +195,19 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
+
                   # Use existing CodeStar connection for repository operations
                   - codestar-connections:UseConnection
+
                   # Pass connection credentials to CodePipeline service actions
                   - codestar-connections:PassConnection
+
                   # Scoped to specific connection to prevent unauthorized repository access
                   - codestar-connections:GetConnection
                   - codestar-connections:ListConnections
                 Resource:
-                  - !Sub "arn:aws:codeconnections:eu-west-1:${AWS::AccountId}:connection/*"
-                  - !Sub "arn:aws:codeconnections:eu-west-2:${AWS::AccountId}:connection/*"
+                  - !Sub arn:aws:codeconnections:eu-west-1:${AWS::AccountId}:connection/*
+                  - !Sub arn:aws:codeconnections:eu-west-2:${AWS::AccountId}:connection/*
                   - !Ref ConnectionArn
 
 Outputs:
@@ -203,37 +222,7 @@ Outputs:
       the principle of least privilege through scoped permissions.
     Value: !GetAtt CodePipelineRole.Arn
     Export:
+
       # Project-specific export name prevents conflicts between multiple pipeline stacks
       # Format: {ProjectName}-CodePipelineRoleArn (e.g., Portfolio-CodePipelineRoleArn)
       Name: Portfolio-CodePipelineRoleArn
-# Template Usage and Maintenance Notes:
-#
-# 1. Security Best Practices:
-#    - Role follows principle of least privilege with scoped permissions
-#    - Connection ARNs prevent unauthorized repository access
-#    - SSM parameters provide secure credential storage
-#    - IAM PassRole is limited to specific execution roles
-#
-# 2. Deployment Prerequisites:
-#    - CodeStar connection must be established and approved in GitHub
-#    - SSM parameter for GitHub token must exist with proper encryption
-#    - Task execution role must be exported from ECS infrastructure stack
-#    - S3 artifact bucket must be created before pipeline deployment
-#
-# 3. Permission Scope Considerations:
-#    - ECS permissions use "*" resources due to cross-service dependencies
-#    - Application auto scaling requires broad permissions for dynamic scaling
-#    - CloudWatch logs permissions accommodate dynamic log group creation
-#    - CodeBuild permissions support multiple projects within the account
-#
-# 4. Troubleshooting Common Issues:
-#    - Connection failures: Verify CodeStar connection status in AWS Console
-#    - ECS deployment errors: Check task execution role permissions and exports
-#    - S3 access denied: Confirm artifact bucket name matches parameter value
-#    - Build failures: Verify CodeBuild project names and permissions
-#
-# 5. Monitoring and Auditing:
-#    - Use CloudTrail to monitor role usage and permission effectiveness
-#    - Review IAM Access Analyzer findings for permission optimization
-#    - Monitor CloudWatch logs for permission-related deployment failures
-#    - Regularly audit SSM parameter access patterns

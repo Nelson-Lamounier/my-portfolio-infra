@@ -1,6 +1,6 @@
 # @format
----
 AWSTemplateFormatVersion: "2010-09-09"
+
 Description: |
   Dynamic CI/CD Pipeline Template for Container Applications
 
@@ -21,68 +21,67 @@ Description: |
 
 Parameters:
   ArtifactBucket:
-    Type: String
     Description: |
       S3 bucket name for storing pipeline artifacts.
       This bucket serves as temporary storage for source code, build outputs,
       and deployment artifacts as they move between pipeline stages.
       Should be pre-created and accessible by the pipeline role.
-    Default: "infra/"
+    Type: String
+    Default: infra/
 
     # Optional secondary service for full-stack applications
   SecondaryServiceName:
-    Type: String
     Description: Name of the secondary ECS service (for full-stack apps)
+    Type: String
     Default: ""
 
   ServiceName:
-    Type: String
     Description: |
       Name of the target ECS service for deployments.
       This service must exist in the ECS cluster and should match the
       container name specified in the task definition.
       Example: 'portfolio-service', 'api-service'
+    Type: String
 
   ProjectName:
-    Type: String
     Description: |
       Unique identifier for this project's resources.
       Used to create unique names for CodeBuild projects, pipelines,
       and IAM roles to prevent conflicts when deploying multiple pipelines.
       Convention: PascalCase (e.g., 'Portfolio', 'EcommerceAPI', 'BlogApp')
+    Type: String
 
   RepositoryId:
-    Type: String
     Description: |
       GitHub repository identifier in 'owner/repository' format.
       This repository contains the source code and Dockerfile for the application.
       Examples: 'myorg/frontend-app', 'username/personal-portfolio'
       Repository must be accessible via the provided CodeStar connection.
+    Type: String
 
   ConnectionArn:
-    Type: String
     Description: |
       ARN of the CodeStar connection for GitHub integration.
       This connection must be pre-established and approved in both AWS and GitHub.
       Provides secure, token-based authentication without storing credentials.
       Format: arn:aws:codeconnections:region:account:connection/connection-id
+    Type: String
 
   ContainerName:
-    Type: String
     Description: |
       Container name as defined in the ECS task definition.
       This name is used in imagedefinitions.json to specify which container
       image to update during deployment. Must match exactly with the task definition.
       If unsure, check your ECS task definition in the AWS Console.
+    Type: String
 
   # Optional secondary container for full-stack applications
   SecondaryContainerName:
-    Type: String
     Description: Secondary container name (for full-stack apps)
+    Type: String
     Default: ""
 
   ECRRepositoryName:
-    Type: String
     Description: |
       Name of the ECR repository for storing Docker images.
       Repository must exist before pipeline execution and should follow
@@ -90,31 +89,40 @@ Parameters:
       Examples: 'portfolio-app', 'ecommerce-frontend', 'api-backend'
 
     # Optional secondary ECR repository for full-stack applications
-  SecondaryECRRepositoryName:
     Type: String
+
+  SecondaryECRRepositoryName:
     Description: Name of the secondary ECR repository (for full-stack apps)
+    Type: String
     Default: ""
 
   TemplateBucket:
-    Type: String
     Description: |
       S3 bucket containing CloudFormation templates.
       Used by nested stacks to reference IAM policy templates.
+    Type: String
 
   # Project type to determine build strategy
   ProjectType:
-    Type: String
     Description: Type of project (single-container or full-stack)
-    Default: "single-container"
+    Type: String
     AllowedValues:
-      - "single-container"
-      - "full-stack"
+      - single-container
+      - full-stack
+    Default: single-container
 
 Conditions:
-  IsFullStack: !Equals [!Ref ProjectType, "full-stack"]
-  HasSecondaryService: !Not [!Equals [!Ref SecondaryServiceName, ""]]
+  IsFullStack: !Equals
+    - !Ref ProjectType
+    - full-stack
+
+  HasSecondaryService: !Not
+    - !Equals
+      - !Ref SecondaryServiceName
+      - ""
 
 Resources:
+
   # # Nested Stack: CodeBuild IAM Policies
   # # Separates IAM concerns for better maintainability and reusability
 
@@ -125,6 +133,7 @@ Resources:
       Name: !Sub ${ProjectName}-CodeBuild
       Source:
         Type: CODEPIPELINE
+
         # Always use buildspec.yml from the repository
         # Remove BuildSpec property to use default buildspec.yml location
       Artifacts:
@@ -139,24 +148,33 @@ Resources:
             Value: !Ref AWS::Region
           - Name: AWS_ACCOUNT_ID
             Value: !Ref AWS::AccountId
+
           # Pass ECR repository name to buildspec
           - Name: ECR_REPOSITORY_NAME
             Value: !Ref ECRRepositoryName
+
           # Pass container name to buildspec
           - Name: CONTAINER_NAME
             Value: !Ref ContainerName
+
           # Conditional environment variables for full-stack
           - Name: SECONDARY_ECR_REPOSITORY_NAME
-            Value:
-              !If [HasSecondaryContainer, !Ref SecondaryECRRepositoryName, ""]
+            Value: !If
+              - HasSecondaryContainer
+              - !Ref SecondaryECRRepositoryName
+              - ""
           - Name: SECONDARY_CONTAINER_NAME
-            Value: !If [HasSecondaryContainer, !Ref SecondaryContainerName, ""]
+            Value: !If
+              - HasSecondaryContainer
+              - !Ref SecondaryContainerName
+              - ""
       ServiceRole: !ImportValue Portfolio-CodeBuildRoleArn
 
   # CodePipeline: Orchestrates the complete CI/CD workflow
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
+
       # Project-specific naming for easy identification in console
       Name: !Sub ${ProjectName}-Pipeline
 
@@ -167,8 +185,8 @@ Resources:
       ArtifactStore:
         Type: S3
         Location: !Ref ArtifactBucket
-
       Stages:
+
         # Stage 1: Source Code Retrieval
         - Name: Source
           Actions:
@@ -184,6 +202,7 @@ Resources:
                 BranchName: main # Primary branch for deployments
                 OutputArtifactFormat: CODE_ZIP # Compressed source for efficiency
               OutputArtifacts:
+
                 # Source code package for build stage
                 - Name: SourceOutput
 
@@ -197,12 +216,15 @@ Resources:
                 Provider: CodeBuild # Managed build service
                 Version: 1
               InputArtifacts:
+
                 # Source code from previous stage
                 - Name: SourceOutput
               OutputArtifacts:
+
                 # Build artifacts including imagedefinitions.json
                 - Name: BuildOutput
               Configuration:
+
                 # Reference to CodeBuild project created above
                 ProjectName: !Ref CodeBuildProject
 
@@ -216,13 +238,17 @@ Resources:
                   Provider: ECS # Native ECS deployment action
                   Version: 1
                 InputArtifacts:
+
                   # Build artifacts containing deployment manifest
                   - Name: BuildOutput
                 Configuration:
+
                   # Target ECS cluster (imported from infrastructure stack)
                   ClusterName: !ImportValue ECSClusterName
+
                   # Target ECS service for container updates
                   ServiceName: !Ref ServiceName
+
                   # Deployment manifest specifying container image updates
                   FileName: imagedefinitions.json
 
@@ -250,36 +276,6 @@ Outputs:
       '{ProjectName}-Pipeline' for consistent identification.
     Value: !Ref Pipeline
     Export:
+
       # Export for potential use by monitoring or notification stacks
       Name: !Sub ${ProjectName}-PipelineName
-# Template Usage Guidelines:
-#
-# 1. Prerequisites:
-#    - ECR repository must exist with specified name
-#    - ECS cluster and service must be deployed
-#    - CodeStar connection must be established and approved
-#    - S3 artifact bucket must exist with appropriate permissions
-#    - Source repository must contain a valid Dockerfile
-#
-# 2. Deployment Flow:
-#    - Deploy IAM policy stacks first (automatic via nested stacks)
-#    - Pipeline creation triggers initial execution if source is available
-#    - Subsequent commits to main branch trigger automatic deployments
-#
-# 3. Customization Options:
-#    - Modify BuildSpec for multi-stage builds or testing
-#    - Adjust compute type for larger applications
-#    - Add approval actions for production deployments
-#    - Integrate with notification services (SNS, Slack)
-#
-# 4. Monitoring and Troubleshooting:
-#    - Check CodeBuild logs for build failures
-#    - Verify ECR permissions if push operations fail
-#    - Confirm container names match between BuildSpec and task definition
-#    - Monitor ECS service events for deployment issues
-#
-# 5. Security Considerations:
-#    - IAM roles follow least privilege principle
-#    - Source code is encrypted in transit and at rest
-#    - Container images are scanned by ECR for vulnerabilities
-#    - Secrets are managed through SSM Parameter Store

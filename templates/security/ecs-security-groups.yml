@@ -1,0 +1,72 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Security groups for ECS services
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Environment name for resource naming and isolation
+    Default: "dev"
+    AllowedValues: ["dev", "staging", "production"]
+
+Resources:
+  # Security group for ECS tasks
+  ECSTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "ECS-TaskSecurityGroup-${Environment}"
+      GroupDescription: !Sub "Security group for ECS tasks in ${Environment} environment"
+      VpcId: !ImportValue 
+        Fn::Sub: "VPC-${Environment}"
+      SecurityGroupIngress:
+        # Allow traffic from ALB on application ports
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description: "Allow HTTP traffic from ALB"
+        
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description: "Allow traffic from ALB on port 8080"
+        
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 4000
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description: "Allow traffic from ALB on app ports 3000-4000"
+        
+        # Dynamic port range for ECS tasks
+        - IpProtocol: tcp
+          FromPort: 32768
+          ToPort: 65535
+          SourceSecurityGroupId: !ImportValue LoadBalancerSGId
+          Description: "Allow traffic from ALB on ephemeral ports"
+      
+      SecurityGroupEgress:
+        # Allow all outbound traffic (for pulling images, etc.)
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound traffic"
+      
+      Tags:
+        - Key: Name
+          Value: !Sub "ECS-TaskSecurityGroup-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ECSTaskSecurityGroupId:
+    Description: ID of the ECS task security group
+    Value: !Ref ECSTaskSecurityGroup
+    Export:
+      Name: !Sub "ECSTaskSecurityGroupId-${Environment}"
+
+  ECSTaskSecurityGroupName:
+    Description: Name of the ECS task security group
+    Value: !Ref ECSTaskSecurityGroup
+    Export:
+      Name: !Sub "ECSTaskSecurityGroupName-${Environment}"

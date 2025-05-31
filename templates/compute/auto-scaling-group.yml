@@ -1,0 +1,201 @@
+# @format
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Auto Scaling Group for ECS instances
+
+Parameters:
+  Environment:
+    Description: Environment name for resource naming and isolation
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - production
+    Default: dev
+
+  MinSize:
+    Description: Minimum number of instances
+    Type: Number
+    Default: 1
+
+  MaxSize:
+    Description: Maximum number of instances
+    Type: Number
+    Default: 3
+
+  DesiredCapacity:
+    Description: Desired number of instances
+    Type: Number
+    Default: 1
+
+Resources:
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: !If
+          - !Equals [!Ref Environment, "production"]
+          - 1
+          - 0
+        MaxBatchSize: 1
+        PauseTime: PT5M
+        WaitOnResourceSignals: false
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+    Properties:
+      AutoScalingGroupName: !Sub "ECS-ASG-${Environment}"
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+      VPCZoneIdentifier:
+        - !ImportValue 
+          Fn::Sub: "PublicSubnet1-${Environment}"
+        - !ImportValue 
+          Fn::Sub: "PublicSubnet2-${Environment}"
+      LaunchTemplate:
+        LaunchTemplateId: !ImportValue 
+          Fn::Sub: "LaunchTemplateId-${Environment}"
+        Version: !ImportValue 
+          Fn::Sub: "LaunchTemplateVersion-${Environment}"
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      DefaultCooldown: 300
+      CapacityRebalance: !If
+        - !Equals [!Ref Environment, "production"]
+        - true
+        - false
+      TerminationPolicies:
+        - OldestInstance
+        - Default
+      EnabledMetrics:
+        - GroupMinSize
+        - GroupMaxSize
+        - GroupDesiredCapacity
+        - GroupInServiceInstances
+        - GroupTotalInstances
+        - GroupPendingInstances
+        - GroupStandbyInstances
+        - GroupTerminatingInstances
+      Tags:
+        - Key: Name
+          Value: !Sub "ECSInstance-${Environment}"
+          PropagateAtLaunch: true
+        - Key: AmazonECSManaged
+          Value: "true"
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: "Portfolio"
+          PropagateAtLaunch: true
+        - Key: Component
+          Value: "ECS-AutoScaling"
+          PropagateAtLaunch: true
+
+  # Scale Up Policy
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Cooldown: 300
+      ScalingAdjustment: 1
+      PolicyType: SimpleScaling
+
+  # Scale Down Policy
+  ScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Cooldown: 300
+      ScalingAdjustment: -1
+      PolicyType: SimpleScaling
+
+  # CPU High Alarm
+  CPUHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ECS-CPUHigh-${Environment}"
+      AlarmDescription: !Sub "CPU utilization high for ECS instances in ${Environment}"
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !If
+        - !Equals [!Ref Environment, "production"]
+        - 70
+        - 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      AlarmActions:
+        - !Ref ScaleUpPolicy
+      TreatMissingData: notBreaching
+
+  # CPU Low Alarm
+  CPULowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "ECS-CPULow-${Environment}"
+      AlarmDescription: !Sub "CPU utilization low for ECS instances in ${Environment}"
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: !If
+        - !Equals [!Ref Environment, "production"]
+        - 30
+        - 20
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      AlarmActions:
+        - !Ref ScaleDownPolicy
+      TreatMissingData: notBreaching
+
+Outputs:
+  AutoScalingGroupName:
+    Description: Name of the Auto Scaling Group
+    Value: !Ref AutoScalingGroup
+    Export:
+      Name: !Sub "AutoScalingGroupName-${Environment}"
+
+  AutoScalingGroupArn:
+    Description: ARN of the Auto Scaling Group
+    Value: !Ref AutoScalingGroup
+    Export:
+      Name: !Sub "AutoScalingGroupArn-${Environment}"
+
+  ScaleUpPolicyArn:
+    Description: ARN of the scale up policy
+    Value: !Ref ScaleUpPolicy
+    Export:
+      Name: !Sub "ScaleUpPolicyArn-${Environment}"
+
+  ScaleDownPolicyArn:
+    Description: ARN of the scale down policy
+    Value: !Ref ScaleDownPolicy
+    Export:
+      Name: !Sub "ScaleDownPolicyArn-${Environment}"
+
+  CPUHighAlarmArn:
+    Description: ARN of the CPU high alarm
+    Value: !Ref CPUHighAlarm
+    Export:
+      Name: !Sub "CPUHighAlarmArn-${Environment}"
+
+  CPULowAlarmArn:
+    Description: ARN of the CPU low alarm
+    Value: !Ref CPULowAlarm
+    Export:
+      Name: !Sub "CPULowAlarmArn-${Environment}"
