@@ -1,7 +1,7 @@
 # @format
 ---
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Master Nested Stack to deploy portfolio infrastructure components
+Description: "Master orchestration template for Portfolio infrastructure using modular stack approach"
 
 Mappings:
   TagMap:
@@ -17,830 +17,392 @@ Mappings:
       CostCenter: Production
 
 Parameters:
+  # Core Parameters
   Environment:
     Type: String
     AllowedValues: [dev, prod]
     Default: dev
     Description: Deployment environment (dev or prod)
 
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  # Template Configuration
   TemplateBucket:
     Type: String
     Description: S3 Bucket containing the nested templates
+
   TemplatePrefix:
     Type: String
-    Description: Folder path
+    Description: Folder path for templates
+
   ArtifactBucket:
     Type: String
     Description: The S3 bucket used to store build artifacts
-  ECSClusterNameParam:
-    Type: String
+
   Region:
     Type: String
+    Description: AWS Region
+    Default: !Ref AWS::Region
+
+  # Networking Parameters
+  VpcCidr:
+    Type: String
+    Description: CIDR block for VPC
+    Default: "10.0.0.0/16"
+
   RootDomainName:
     Type: String
+    Description: Root domain name
+
   WWWDomainName:
     Type: String
+    Description: WWW domain name
+
   Project1Domain:
     Type: String
+    Description: Project 1 domain name
+
   Project2Domain:
     Type: String
+    Description: Project 2 domain name
+
   ProjectFrontendEcommDomain:
     Type: String
+    Description: E-commerce frontend domain
+
   ProjectBackendEcommDomain:
     Type: String
+    Description: E-commerce backend domain
+
   HostedZoneId:
     Type: String
-  CidrIp:
-    Type: String
-    Default: |
-      Use to secure SSH access to the instances from a specific IP or range.
+    Description: Route 53 hosted zone ID
 
-      # Project 2 Dynamic Pipeline Parameters
-  PortfolioRepositoryId:
+  # Health Check Parameters
+  PortfolioHealthCheckPath:
     Type: String
-    Description: GitHub repository for main portfolio (owner/repo)
-
-  PortfolioConnectionArn:
-    Type: String
-    Description: CodeStar connection ARN for main portfolio
-
-  PortfolioContainerName:
-    Type: String
-    Description: Container name for main portfolio
-    Default: portfolio-container
-
-  PortfolioECRRepository:
-    Type: String
-    Description: ECR repository name for main portfolio
-    Default: portfolio-dev
-
-  # Project 1 Dynamic Pipeline Parameters
-  Project1RepositoryId:
-    Type: String
-    Description: GitHub repository for Project 1 (owner/repo)
-    Default: Nelson-Lamounier/magic-rainbow-demo
-
-  Project1ConnectionArn:
-    Type: String
-    Description: CodeStar connection ARN for Project 1
-
-  Project1ContainerName:
-    Type: String
-    Description: Container name for Project 1
-    Default: project1-container
-
-  Project1ECRRepository:
-    Type: String
-    Description: ECR repository name for Project 1
-    Default: project1-dev
-
-    # Project 2 Dynamic Pipeline Parameters
-  Project2RepositoryId:
-    Type: String
-    Description: GitHub repository for Project 2 (owner/repo)
-
-  Project2ConnectionArn:
-    Type: String
-    Description: CodeStar connection ARN for Project 2
-
-  Project2ContainerName:
-    Type: String
-    Description: Container name for Project 2
-    Default: project2-container
-
-  Project2ECRRepository:
-    Type: String
-    Description: ECR repository name for Project 2
-    Default:
-      project2-dev
-
-      # Project fullStack Dynamic Pipeline Parameters
-  ProjectFullStackRepositoryId:
-    Type: String
-    Description: GitHub repository for Project 2 (owner/repo)
-
-  ProjectFullStackConnectionArn:
-    Type: String
-    Description: CodeStar connection ARN for Project 2
-
-  ProjectFullStackContainerName:
-    Type: String
-    Description: Container name for Project 2
-
-  ProjectFullStackSecondaryContainerName:
-    Type: String
-    Description: Container name for Project 2
-
-  ProjectFullStackECRRepository:
-    Type: String
-    Description: ECR repository name for Project 2
-    Default: frontend-ecomm-dev
-
-  ProjectFullStackSecondaryECRRepository:
-    Type: String
-    Description: ECR repository name for Project 2
-    Default: backend-ecomm-dev
-
-    PortfolioHealthCheckPath:
-    Type: String
-    Description: Health check path for portfolio service
     Default: "/"
-  
+
   Project1HealthCheckPath:
     Type: String
-    Description: Health check path for project1 service
     Default: "/healthcheck"
-  
+
   Project2HealthCheckPath:
     Type: String
-    Description: Health check path for project2 service
-    Default: "/api/health"
-  
-  EcommerceFrontendHealthCheckPath:
-    Type: String
-    Description: Health check path for ecommerce frontend service
-    Default: "/health"
-  
-  EcommerceBackendHealthCheckPath:
-    Type: String
-    Description: Health check path for ecommerce backend service
     Default: "/api/health"
 
-  MigrationMode:
+  EcommerceFrontendHealthCheckPath:
     Type: String
-    Description: Migration mode for Project 1
-    AllowedValues:
-      - migrate
-      - no-migrate
-    Default: migrate
-    ConstraintDescription: Must be either 'migrate' or 'no-migrate'
+    Default: "/health"
+
+  EcommerceBackendHealthCheckPath:
+    Type: String
+    Default: "/api/health"
+
+  # Compute Parameters
+  ECSClusterNameParam:
+    Type: String
+    Description: ECS Cluster name
 
   ECSInstanceType:
     Type: String
     Description: EC2 instance type for ECS cluster
     Default: t3.large
-    AllowedValues:
-      - t3.micro
-      - t3.small
-      - t3.medium
-      - t3.large
-      - t3.xlarge
 
-  # Add VPC CIDR parameter
-  VpcCidr:
+  CidrIp:
     Type: String
-    Description: CIDR block for VPC
-    Default: "10.0.0.0/16"
-    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    Description: CIDR IP for SSH access
+
+  MigrationMode:
+    Type: String
+    AllowedValues: [migrate, no-migrate]
+    Default: migrate
+
+  # GitHub Repository Parameters
+  PortfolioRepositoryId:
+    Type: String
+    Description: GitHub repository for main portfolio
+
+  PortfolioConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for main portfolio
+
+  Project1RepositoryId:
+    Type: String
+    Description: GitHub repository for Project 1
+
+  Project1ConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Project 1
+
+  Project2RepositoryId:
+    Type: String
+    Description: GitHub repository for Project 2
+
+  Project2ConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Project 2
+
+  ProjectFullStackRepositoryId:
+    Type: String
+    Description: GitHub repository for Full Stack project
+
+  ProjectFullStackConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Full Stack project
+
+  # Container and ECR Parameters
+  PortfolioContainerName:
+    Type: String
+    Default: "portfolio-container"
+
+  PortfolioECRRepository:
+    Type: String
+    Default: "portfolio-dev"
+
+  Project1ContainerName:
+    Type: String
+    Default: "project1-container"
+
+  Project1ECRRepository:
+    Type: String
+    Default: "project1-dev"
+
+  Project2ContainerName:
+    Type: String
+    Default: "project2-container"
+
+  Project2ECRRepository:
+    Type: String
+    Default: "project2-dev"
+
+  ProjectFullStackContainerName:
+    Type: String
+    Default: "project-frontend-ecomm-container"
+
+  ProjectFullStackSecondaryContainerName:
+    Type: String
+    Default: "project-backend-ecomm-container"
+
+  ProjectFullStackECRRepository:
+    Type: String
+    Default: "frontend-ecomm-dev"
+
+  ProjectFullStackSecondaryECRRepository:
+    Type: String
+    Default: "backend-ecomm-dev"
 
 Resources:
-  VPCStack:
+  # Networking Stack - VPC, Load Balancer, DNS, SSL
+  NetworkingStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}core/vpc.yml
-      Parameters:
-        Environment: !Ref Environment
-        VpcCidr: !Ref VpcCidr
-        EnableVpcFlowLogs: !If
-          - !Equals [!Ref Environment, "production"]
-          - "true"
-          - "false"
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  LoadBalancerStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - VPCStack
-      - SSLCertificateStack
-    Properties:
-      TemplateURL: !Sub "https://${TemplateBucket}.s3.amazonaws.com/${TemplatePrefix}networking/application-load-balancer.yml"
-      Parameters:
-        Environment: !Ref Environment
-        LoadBalancerName: !Sub "Portfolio-ALB-${Environment}"
-        LoadBalancerSGCidrIp: "0.0.0.0/0"
-        SSLCertificateArn: !GetAtt CertificateStack.Outputs.CertificateArn
-        EnableHTTPS: "true"
-        ServicesConfig: !Sub |
-          [
-            {
-              "name": "portfolio",
-              "port": 80,
-              "domains": ["${RootDomainName}", "${WWWDomainName}"],
-              "priority": 100,
-              "enabled": true,
-              "healthCheckPath": "${PortfolioHealthCheckPath}"
-            },
-            {
-              "name": "project1",
-              "port": 3000,
-              "domains": ["${Project1Domain}"],
-              "priority": 200,
-              "enabled": true,
-              "healthCheckPath": "${Project1HealthCheckPath}"
-            },
-            {
-              "name": "project2",
-              "port": 3001,
-              "domains": ["${Project2Domain}"],
-              "priority": 300,
-              "enabled": true,
-              "healthCheckPath": "${Project2HealthCheckPath}"
-            },
-            {
-              "name": "ecommerce-frontend",
-              "port": 3002,
-              "domains": ["${ProjectFrontendEcommDomain}"],
-              "priority": 400,
-              "enabled": true,
-              "healthCheckPath": "${EcommerceFrontendHealthCheckPath}"
-            },
-            {
-              "name": "ecommerce-backend",
-              "port": 4000,
-              "domains": ["${ProjectBackendEcommDomain}"],
-              "priority": 500,
-              "enabled": true,
-              "healthCheckPath": "${EcommerceBackendHealthCheckPath}"
-            }
-          ]
-        HealthCheckPath: "/"
-        HealthCheckIntervalSeconds: 30
-        HealthyThresholdCount: 2
-        UnhealthyThresholdCount: 3
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  LaunchTemplateStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: 
-      - VPCStack
-      - LoadBalancerStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/launch-template.yml
-      Parameters:
-        ECSClusterNameParam: !Ref ECSClusterNameParam
-        PublicSubnetId: !GetAtt VPCStack.Outputs.PublicSubnet1
-        CidrIp: !Ref CidrIp
-        ECSInstanceType: !Ref ECSInstanceType 
-        KeyPairName: "freelancer-key-pair"
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-
-  ECSClusterStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: VPCStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-cluster.yml
-      Parameters:
-        ECSClusterNameParam: !Ref ECSClusterNameParam
-        Environment: !Ref Environment
-        Region: !Ref Region
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  # ECS Roles Stack (rename from ECSRolesStack for clarity)
-  ECSPoliciesStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: 
-      - KMSStack
-      - VPCStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-policies.yml
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}stacks/networking-stack.yml"
       Parameters:
         Environment: !Ref Environment
         ProjectName: !Ref ProjectName
-        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
-        VPCId: !GetAtt VPCStack.Outputs.VPCId
-        LogGroupPrefix: !Sub "/ecs/${ProjectName}"
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Environment
-          Value: !Ref Environment
-
-    # Update ECS Security Groups Stack
-  ECSSecurityGroupsStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - VPCStack
-      - LoadBalancerStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-security-groups.yml
-      Parameters:
-        Environment: !Ref Environment
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  ServiceStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - ECSClusterStack
-      - ECSPoliciesStack
-      - ECSSecurityGroupsStack
-      - LoadBalancerStack
-      - AutoScalingStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
-      Parameters:
-        Environment: !Ref Environment
-        ProjectName: Portfolio
-        ServiceName: portfolio-service
-        ContainerName: !Ref PortfolioContainerName
-        ECRRepository: !Ref PortfolioECRRepository
-        ContainerPort: 80
-        HostPort: 0
-        CPU: 256
-        Memory: 512
-        DesiredCount: !If
-          - !Equals [!Ref Environment, "production"]
-          - 2
-          - 1
-        TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.TargetGroupArn
-        Region: !Ref Region
-        MigrationMode: !Ref MigrationMode
-        ExportSuffix: V1
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  Project1ServiceStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - ECSClusterStack
-      - LoadBalancerStack
-      - AutoScalingStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
-      Parameters:
-        ProjectName: Project1
-        ServiceName: project1-service
-        ContainerName: project1-container
-        ECRRepository: !Ref Project1ECRRepository
-        ContainerPort: 3000
-        HostPort: 0
-        CPU: 128
-        Memory: 256
-        DesiredCount: 1
-        TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.Project1TargetGroupArn
-        Region: !Ref Region
-        MigrationMode: !Ref MigrationMode
-        ExportSuffix: V1
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  Project2ServiceStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - ECSClusterStack
-      - LoadBalancerStack
-      - AutoScalingStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
-      Parameters:
-        ProjectName: Project2
-        ServiceName: project2-service
-        ContainerName: project2-container
-        ECRRepository: !Ref Project2ECRRepository
-        ContainerPort: 3001
-        HostPort: 0
-        CPU: 128
-        Memory: 256
-        DesiredCount: 1
-        TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.Project2TargetGroupArn
-        Region: !Ref Region
-        MigrationMode: !Ref MigrationMode
-        ExportSuffix: V1
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  ProjectFullStackServiceStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - ECSClusterStack
-      - LoadBalancerStack
-      - AutoScalingStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml
-      Parameters:
-        ProjectName: ProjectFullStack
-        ServiceName: fullstack-ecomm-service
-        # Primary container (Frontend)
-        ContainerName: project-frontend-ecomm-container
-        ECRRepository: frontend-ecomm-dev
-        ContainerPort: 3002
-        HostPort: 0
-        CPU: 128
-        Memory: 256
-        DesiredCount: 1
-        TargetGroupArn: !GetAtt LoadBalancerStack.Outputs.ProjectFrontendEcommTargetGroupArn
-        # Secondary container (Backend)
-        SecondaryContainerName: project-backend-ecomm-container
-        SecondaryECRRepository: backend-ecomm-dev
-        SecondaryContainerPort: 4000
-        SecondaryHostPort: 0
-        CPU: 128
-        Memory: 256
-        DesiredCount: 1
-        SecondaryTargetGroupArn: !GetAtt LoadBalancerStack.Outputs.ProjectBackendEcommTargetGroupArn
-        # Resources
-        Region: !Ref Region
-        MigrationMode: !Ref MigrationMode
-        ExportSuffix: V1
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  AutoScalingStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - LaunchTemplateStack
-      - ECSClusterStack
-      - VPCStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/auto-scalling-group.yml
-      Parameters:
-        Environment: !Ref Environment
-        MinSize: !If
-          - !Equals [!Ref Environment, "production"]
-          - 2
-          - 1
-        MaxSize: !If
-          - !Equals [!Ref Environment, "production"]
-          - 6
-          - 3
-        DesiredCapacity: !If
-          - !Equals [!Ref Environment, "production"]
-          - 2
-          - 1
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  DNSStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: LoadBalancerStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/dns-records.yml
-      Parameters:
-        Environment: !Ref Environment
-        HostedZoneId: !Ref HostedZoneId
-        # Environment-specific domain prefix
-        EnvironmentDomainPrefix: !If
-          - !Equals [!Ref Environment, "production"]
-          - ""  # No prefix for production
-          - !Sub "${Environment}."  # dev., staging. prefix
-        DefaultTTL: !If
-          - !Equals [!Ref Environment, "production"]
-          - 300   # 5 minutes for production
-          - 60    # 1 minute for dev/staging (faster updates)
-        DomainsConfig: !Sub |
-          [
-            {
-              "name": "root",
-              "domain": "${RootDomainName}",
-              "enabled": true,
-              "description": "Main portfolio site"
-            },
-            {
-              "name": "www",
-              "domain": "${WWWDomainName}",
-              "enabled": true,
-              "description": "WWW subdomain"
-            },
-            {
-              "name": "project1",
-              "domain": "${Project1Domain}",
-              "enabled": true,
-              "description": "Project 1 application"
-            },
-            {
-              "name": "project2", 
-              "domain": "${Project2Domain}",
-              "enabled": true,
-              "description": "Project 2 application"
-            },
-            {
-              "name": "ecomm-frontend",
-              "domain": "${ProjectFrontendEcommDomain}",
-              "enabled": true,
-              "description": "E-commerce frontend"
-            },
-            {
-              "name": "ecomm-backend",
-              "domain": "${ProjectBackendEcommDomain}",
-              "enabled": true,
-              "description": "E-commerce backend API"
-            }
-          ]
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Owner
-          Value: !FindInMap [TagMap, !Ref Environment, Owner]
-        - Key: CreatedBy
-          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
-        - Key: CostCenter
-          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
-        - Key: Environment
-          Value: !Ref Environment
-
-  SSLCertificateStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/ssl-certificate.yml
-      Parameters:
-        Environment: !Ref Environment
-        HostedZoneId: !Ref HostedZoneId
-        PrimaryDomainName: !Ref RootDomainName
-        # Environment-specific domain prefix
-        EnvironmentDomainPrefix: !If
-          - !Equals [!Ref Environment, "production"]
-          - ""  # No prefix for production
-          - !Sub "${Environment}."  # dev., staging. prefix
-        DomainsConfig: !Sub |
-          [
-            {
-              "name": "www",
-              "domain": "${WWWDomainName}",
-              "enabled": true
-            },
-            {
-              "name": "project1",
-              "domain": "${Project1Domain}",
-              "enabled": true
-            },
-            {
-              "name": "project2",
-              "domain": "${Project2Domain}",
-              "enabled": true
-            },
-            {
-              "name": "ecomm-frontend",
-              "domain": "${ProjectFrontendEcommDomain}",
-              "enabled": true
-            },
-            {
-              "name": "ecomm-backend",
-              "domain": "${ProjectBackendEcommDomain}",
-              "enabled": true
-            }
-          ]
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Environment
-          Value: !Ref Environment
-
-
-  KMSStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/kms.yml
-      Parameters:
-        Environment: !Ref Environment
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-  # CodeBuild Policies Stack
-  CodeBuildPoliciesStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: KMSStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codebuild-policies.yml
-      Parameters:
-        Environment: !Ref Environment
-        ArtifactBucket: !Ref ArtifactBucket
-        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
-        ProjectsConfig: !Sub |
-          [
-            {
-              "name": "Portfolio",
-              "ecrRepositories": ["${PortfolioECRRepository}"],
-              "enabled": true
-            },
-            {
-              "name": "Project1",
-              "ecrRepositories": ["${Project1ECRRepository}"],
-              "enabled": true
-            },
-            {
-              "name": "Project2",
-              "ecrRepositories": ["project2"],
-              "enabled": true
-            },
-            {
-              "name": "ProjectFullStack",
-              "ecrRepositories": ["frontend-ecomm", "backend-ecomm"],
-              "enabled": true
-            }
-          ]
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Environment
-          Value: !Ref Environment
-
-  # CodePipeline Policies Stack
-  CodePipelinePoliciesStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn: KMSStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codepipeline-policies.yml
-      Parameters:
-        Environment: !Ref Environment
-        ProjectName: !Ref ProjectName
-        ArtifactBucket: !Ref ArtifactBucket
-        ConnectionArn: !Ref GitHubConnectionArn
-        TaskExecutionRoleArn: !GetAtt ECSRolesStack.Outputs.TaskExecutionRoleArn
-        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
-      Tags:
-        - Key: Project
-          Value: !FindInMap [TagMap, !Ref Environment, Project]
-        - Key: Environment
-          Value: !Ref Environment
-
-  # CI/CD Pipeline Stack
-  PipelineStack:
-    Type: AWS::CloudFormation::Stack
-    DependsOn:
-      - ECSClusterStack
-      - ECSRolesStack
-      - LoadBalancerStack
-    Properties:
-      TemplateURL: !Sub https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml
-      Parameters:
-        Environment: !Ref Environment
-        ArtifactBucket: !Sub "${ArtifactBucket}"
         TemplateBucket: !Ref TemplateBucket
-        ConnectionArn: !Ref GitHubConnectionArn
-        # Environment-specific build configuration
-        CodeBuildComputeType: !If
-          - !Equals [!Ref Environment, "production"]
-          - BUILD_GENERAL1_LARGE
-          - BUILD_GENERAL1_MEDIUM
-        EnableApprovals: !If
-          - !Equals [!Ref Environment, "production"]
-          - "true"
-          - "false"
-        ApprovalTimeoutInMinutes: !If
-          - !Equals [!Ref Environment, "production"]
-          - 120  # 2 hours for production
-          - 60   # 1 hour for staging
-        ProjectsConfig: !Sub |
-          [
-            {
-              "name": "Portfolio",
-              "repositoryId": "${PortfolioRepositoryId}",
-              "containerName": "${PortfolioContainerName}",
-              "serviceName": "portfolio-service",
-              "ecrRepository": "${PortfolioECRRepository}",
-              "projectType": "single-container",
-              "enabled": true,
-              "branches": {
-                "dev": "develop",
-                "staging": "staging",
-                "production": "main"
-              }
-            },
-            {
-              "name": "Project1",
-              "repositoryId": "${Project1RepositoryId}",
-              "containerName": "${Project1ContainerName}",
-              "serviceName": "project1-service",
-              "ecrRepository": "${Project1ECRRepository}",
-              "projectType": "single-container",
-              "enabled": true,
-              "branches": {
-                "dev": "develop",
-                "staging": "staging",
-                "production": "main"
-              }
-            },
-            {
-              "name": "Project2",
-              "repositoryId": "${Project2RepositoryId}",
-              "containerName": "project2-container",
-              "serviceName": "project2-service",
-              "ecrRepository": "project2",
-              "projectType": "single-container",
-              "enabled": true,
-              "branches": {
-                "dev": "develop",
-                "staging": "staging",
-                "production": "main"
-              }
-            },
-            {
-              "name": "ProjectFullStack",
-              "repositoryId": "${ProjectFullStackRepositoryId}",
-              "containerName": "project-frontend-ecomm-container",
-              "serviceName": "fullstack-ecomm-service",
-              "ecrRepository": "frontend-ecomm",
-              "secondaryContainerName": "project-backend-ecomm-container",
-              "secondaryServiceName": "backend-ecomm-service",
-              "secondaryEcrRepository": "backend-ecomm",
-              "projectType": "full-stack",
-              "enabled": true,
-              "branches": {
-                "dev": "develop",
-                "staging": "staging",
-                "production": "main"
-              }
-            }
-          ]
+        TemplatePrefix: !Ref TemplatePrefix
+        VpcCidr: !Ref VpcCidr
+        RootDomainName: !Ref RootDomainName
+        WWWDomainName: !Ref WWWDomainName
+        Project1Domain: !Ref Project1Domain
+        Project2Domain: !Ref Project2Domain
+        ProjectFrontendEcommDomain: !Ref ProjectFrontendEcommDomain
+        ProjectBackendEcommDomain: !Ref ProjectBackendEcommDomain
+        HostedZoneId: !Ref HostedZoneId
+        PortfolioHealthCheckPath: !Ref PortfolioHealthCheckPath
+        Project1HealthCheckPath: !Ref Project1HealthCheckPath
+        Project2HealthCheckPath: !Ref Project2HealthCheckPath
+        EcommerceFrontendHealthCheckPath: !Ref EcommerceFrontendHealthCheckPath
+        EcommerceBackendHealthCheckPath: !Ref EcommerceBackendHealthCheckPath
       Tags:
         - Key: Project
           Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
         - Key: Environment
           Value: !Ref Environment
+        - Key: StackType
+          Value: "Networking"
+
+  # Security Stack - KMS, IAM, Security Groups
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkingStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}stacks/security-stack.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        TemplateBucket: !Ref TemplateBucket
+        TemplatePrefix: !Ref TemplatePrefix
+        ArtifactBucket: !Ref ArtifactBucket
+        VPCId: !GetAtt NetworkingStack.Outputs.VPCId
+        LoadBalancerSecurityGroupId: !GetAtt NetworkingStack.Outputs.LoadBalancerSecurityGroupId
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Security"
+
+  # Compute Stack - ECS Cluster, Services, Auto Scaling
+  ComputeStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkingStack
+      - SecurityStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}stacks/compute-stack.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        TemplateBucket: !Ref TemplateBucket
+        TemplatePrefix: !Ref TemplatePrefix
+        Region: !Ref Region
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        ECSInstanceType: !Ref ECSInstanceType
+        CidrIp: !Ref CidrIp
+        MigrationMode: !Ref MigrationMode
+        PortfolioContainerName: !Ref PortfolioContainerName
+        PortfolioECRRepository: !Ref PortfolioECRRepository
+        Project1ContainerName: !Ref Project1ContainerName
+        Project1ECRRepository: !Ref Project1ECRRepository
+        Project2ContainerName: !Ref Project2ContainerName
+        Project2ECRRepository: !Ref Project2ECRRepository
+        ProjectFullStackContainerName: !Ref ProjectFullStackContainerName
+        ProjectFullStackSecondaryContainerName: !Ref ProjectFullStackSecondaryContainerName
+        ProjectFullStackECRRepository: !Ref ProjectFullStackECRRepository
+        ProjectFullStackSecondaryECRRepository: !Ref ProjectFullStackSecondaryECRRepository
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  # CI/CD Stack - CodePipeline, CodeBuild
+  CICDStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - SecurityStack
+      - ComputeStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}stacks/cicd-stack.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        TemplateBucket: !Ref TemplateBucket
+        TemplatePrefix: !Ref TemplatePrefix
+        ArtifactBucket: !Ref ArtifactBucket
+        PortfolioRepositoryId: !Ref PortfolioRepositoryId
+        PortfolioConnectionArn: !Ref PortfolioConnectionArn
+        Project1RepositoryId: !Ref Project1RepositoryId
+        Project1ConnectionArn: !Ref Project1ConnectionArn
+        Project2RepositoryId: !Ref Project2RepositoryId
+        Project2ConnectionArn: !Ref Project2ConnectionArn
+        ProjectFullStackRepositoryId: !Ref ProjectFullStackRepositoryId
+        ProjectFullStackConnectionArn: !Ref ProjectFullStackConnectionArn
+        PortfolioContainerName: !Ref PortfolioContainerName
+        Project1ContainerName: !Ref Project1ContainerName
+        Project2ContainerName: !Ref Project2ContainerName
+        ProjectFullStackContainerName: !Ref ProjectFullStackContainerName
+        ProjectFullStackSecondaryContainerName: !Ref ProjectFullStackSecondaryContainerName
+        PortfolioECRRepository: !Ref PortfolioECRRepository
+        Project1ECRRepository: !Ref Project1ECRRepository
+        Project2ECRRepository: !Ref Project2ECRRepository
+        ProjectFullStackECRRepository: !Ref ProjectFullStackECRRepository
+        ProjectFullStackSecondaryECRRepository: !Ref ProjectFullStackSecondaryECRRepository
+      Tags:
+        - Key: Project
+          Value: !FindInMap [TagMap, !Ref Environment, Project]
+        - Key: Owner
+          Value: !FindInMap [TagMap, !Ref Environment, Owner]
+        - Key: CreatedBy
+          Value: !FindInMap [TagMap, !Ref Environment, CreatedBy]
+        - Key: CostCenter
+          Value: !FindInMap [TagMap, !Ref Environment, CostCenter]
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "CICD"
+
+Outputs:
+  # High-level stack outputs
+  NetworkingStackId:
+    Description: Networking Stack ID
+    Value: !Ref NetworkingStack
+    Export:
+      Name: !Sub "${ProjectName}-NetworkingStackId-${Environment}"
+
+  SecurityStackId:
+    Description: Security Stack ID
+    Value: !Ref SecurityStack
+    Export:
+      Name: !Sub "${ProjectName}-SecurityStackId-${Environment}"
+
+  ComputeStackId:
+    Description: Compute Stack ID
+    Value: !Ref ComputeStack
+    Export:
+      Name: !Sub "${ProjectName}-ComputeStackId-${Environment}"
+
+  CICDStackId:
+    Description: CI/CD Stack ID
+    Value: !Ref CICDStack
+    Export:
+      Name: !Sub "${ProjectName}-CICDStackId-${Environment}"
+
+  # Key infrastructure outputs for external reference
+  VPCId:
+    Description: VPC ID
+    Value: !GetAtt NetworkingStack.Outputs.VPCId
+    Export:
+      Name: !Sub "${ProjectName}-VPCId-${Environment}"
+
+  LoadBalancerDNSName:
+    Description: Load Balancer DNS Name
+    Value: !GetAtt NetworkingStack.Outputs.LoadBalancerDNSName
+    Export:
+      Name: !Sub "${ProjectName}-LoadBalancerDNSName-${Environment}"
+
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !GetAtt ComputeStack.Outputs.ECSClusterName
+    Export:
+      Name: !Sub "${ProjectName}-ECSClusterName-${Environment}"
+
+  # Environment configuration summary
+  DeploymentSummary:
+    Description: Deployment configuration summary
+    Value: !Sub |
+      Environment: ${Environment}
+      Project: ${ProjectName}
+      Region: ${Region}
+      VPC CIDR: ${VpcCidr}
+      ECS Instance Type: ${ECSInstanceType}
+      Deployment Date: ${AWS::StackName}
 
 

@@ -1,0 +1,331 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Compute stack - ECS Cluster, Services, Auto Scaling, and Launch Template"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  TemplateBucket:
+    Type: String
+    Description: S3 Bucket containing the nested templates
+
+  TemplatePrefix:
+    Type: String
+    Description: Folder path for templates
+
+  Region:
+    Type: String
+    Description: AWS Region
+
+  # ECS Configuration
+  ECSClusterNameParam:
+    Type: String
+    Description: ECS Cluster name
+
+  ECSInstanceType:
+    Type: String
+    Description: EC2 instance type for ECS cluster
+    Default: t3.large
+
+  CidrIp:
+    Type: String
+    Description: CIDR IP for SSH access
+
+  MigrationMode:
+    Type: String
+    AllowedValues: [migrate, no-migrate]
+    Default: migrate
+
+  # ECR Repository Parameters
+  PortfolioECRRepository:
+    Type: String
+    Default: "portfolio-dev"
+
+  Project1ECRRepository:
+    Type: String
+    Default: "project1-dev"
+
+  Project2ECRRepository:
+    Type: String
+    Default: "project2-dev"
+
+  ProjectFullStackECRRepository:
+    Type: String
+    Default: "frontend-ecomm-dev"
+
+  ProjectFullStackSecondaryECRRepository:
+    Type: String
+    Default: "backend-ecomm-dev"
+
+  # Container Names
+  PortfolioContainerName:
+    Type: String
+    Default: "portfolio-container"
+
+  Project1ContainerName:
+    Type: String
+    Default: "project1-container"
+
+  Project2ContainerName:
+    Type: String
+    Default: "project2-container"
+
+  ProjectFullStackContainerName:
+    Type: String
+    Default: "project-frontend-ecomm-container"
+
+  ProjectFullStackSecondaryContainerName:
+    Type: String
+    Default: "project-backend-ecomm-container"
+
+Mappings:
+  ComputeConfig:
+    dev:
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      ServiceDesiredCount: 1
+    prod:
+      MinSize: 2
+      MaxSize: 6
+      DesiredCapacity: 2
+      ServiceDesiredCount: 2
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, "prod"]
+
+Resources:
+  LaunchTemplateStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/launch-template.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        PublicSubnetId: !ImportValue 
+          Fn::Sub: "${ProjectName}-PublicSubnet1-${Environment}"
+        CidrIp: !Ref CidrIp
+        ECSInstanceType: !Ref ECSInstanceType
+        KeyPairName: "freelancer-key-pair"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  ECSClusterStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-cluster.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        ECSClusterNameParam: !Ref ECSClusterNameParam
+        Region: !Ref Region
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  AutoScalingStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - LaunchTemplateStack
+      - ECSClusterStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/auto-scalling-group.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        MinSize: !FindInMap [ComputeConfig, !Ref Environment, MinSize]
+        MaxSize: !FindInMap [ComputeConfig, !Ref Environment, MaxSize]
+        DesiredCapacity: !FindInMap [ComputeConfig, !Ref Environment, DesiredCapacity]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  PortfolioServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - AutoScalingStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        ServiceName: portfolio-service
+        ContainerName: !Ref PortfolioContainerName
+        ECRRepository: !Ref PortfolioECRRepository
+        ContainerPort: 80
+        HostPort: 0
+        CPU: 256
+        Memory: 512
+        DesiredCount: !FindInMap [ComputeConfig, !Ref Environment, ServiceDesiredCount]
+        TargetGroupArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-TargetGroupArn-${Environment}"
+        Region: !Ref Region
+        MigrationMode: !Ref MigrationMode
+        ExportSuffix: V1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  Project1ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - AutoScalingStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: Project1
+        ServiceName: project1-service
+        ContainerName: !Ref Project1ContainerName
+        ECRRepository: !Ref Project1ECRRepository
+        ContainerPort: 3000
+        HostPort: 0
+        CPU: 128
+        Memory: 256
+        DesiredCount: 1
+        TargetGroupArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-Project1TargetGroupArn-${Environment}"
+        Region: !Ref Region
+        MigrationMode: !Ref MigrationMode
+        ExportSuffix: V1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  Project2ServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - AutoScalingStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: Project2
+        ServiceName: project2-service
+        ContainerName: !Ref Project2ContainerName
+        ECRRepository: !Ref Project2ECRRepository
+        ContainerPort: 3001
+        HostPort: 0
+        CPU: 128
+        Memory: 256
+        DesiredCount: 1
+        TargetGroupArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-Project2TargetGroupArn-${Environment}"
+        Region: !Ref Region
+        MigrationMode: !Ref MigrationMode
+        ExportSuffix: V1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+  ProjectFullStackServiceStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - ECSClusterStack
+      - AutoScalingStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}compute/ecs-service.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: ProjectFullStack
+        ServiceName: fullstack-ecomm-service
+        ContainerName: !Ref ProjectFullStackContainerName
+        ECRRepository: !Ref ProjectFullStackECRRepository
+        ContainerPort: 3002
+        HostPort: 0
+        CPU: 128
+        Memory: 256
+        DesiredCount: 1
+        TargetGroupArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-FrontendEcommTargetGroupArn-${Environment}"
+        SecondaryContainerName: !Ref ProjectFullStackSecondaryContainerName
+        SecondaryECRRepository: !Ref ProjectFullStackSecondaryECRRepository
+        SecondaryContainerPort: 4000
+        SecondaryHostPort: 0
+        SecondaryTargetGroupArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-BackendEcommTargetGroupArn-${Environment}"
+        Region: !Ref Region
+        MigrationMode: !Ref MigrationMode
+        ExportSuffix: V1
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Compute"
+
+Outputs:
+  # ECS Cluster Outputs
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !GetAtt ECSClusterStack.Outputs.ECSClusterName
+    Export:
+      Name: !Sub "${ProjectName}-ECSClusterName-${Environment}"
+
+  ECSClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt ECSClusterStack.Outputs.ECSClusterArn
+    Export:
+      Name: !Sub "${ProjectName}-ECSClusterArn-${Environment}"
+
+  # Launch Template Outputs
+  LaunchTemplateId:
+    Description: Launch Template ID
+    Value: !GetAtt LaunchTemplateStack.Outputs.LaunchTemplateId
+    Export:
+      Name: !Sub "${ProjectName}-LaunchTemplateId-${Environment}"
+
+  # Auto Scaling Group Outputs
+  AutoScalingGroupName:
+    Description: Auto Scaling Group Name
+    Value: !GetAtt AutoScalingStack.Outputs.AutoScalingGroupName
+    Export:
+      Name: !Sub "${ProjectName}-AutoScalingGroupName-${Environment}"
+
+  # Service Outputs
+  PortfolioServiceArn:
+    Description: Portfolio Service ARN
+    Value: !GetAtt PortfolioServiceStack.Outputs.ServiceArn
+    Export:
+      Name: !Sub "${ProjectName}-PortfolioServiceArn-${Environment}"
+
+  Project1ServiceArn:
+    Description: Project1 Service ARN
+    Value: !GetAtt Project1ServiceStack.Outputs.ServiceArn
+    Export:
+      Name: !Sub "${ProjectName}-Project1ServiceArn-${Environment}"
+
+  Project2ServiceArn:
+    Description: Project2 Service ARN
+    Value: !GetAtt Project2ServiceStack.Outputs.ServiceArn
+    Export:
+      Name: !Sub "${ProjectName}-Project2ServiceArn-${Environment}"
+
+  ProjectFullStackServiceArn:
+    Description: Full Stack Service ARN
+    Value: !GetAtt ProjectFullStackServiceStack.Outputs.ServiceArn
+    Export:
+      Name: !Sub "${ProjectName}-FullStackServiceArn-${Environment}"

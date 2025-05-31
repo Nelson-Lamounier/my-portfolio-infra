@@ -1,0 +1,233 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CI/CD stack - CodePipeline, CodeBuild, and related policies"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  TemplateBucket:
+    Type: String
+    Description: S3 Bucket containing the nested templates
+
+  TemplatePrefix:
+    Type: String
+    Description: Folder path for templates
+
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket for build artifacts
+
+  # GitHub Configuration
+  PortfolioRepositoryId:
+    Type: String
+    Description: GitHub repository for main portfolio
+
+  PortfolioConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for main portfolio
+
+  Project1RepositoryId:
+    Type: String
+    Description: GitHub repository for Project 1
+
+  Project1ConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Project 1
+
+  Project2RepositoryId:
+    Type: String
+    Description: GitHub repository for Project 2
+
+  Project2ConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Project 2
+
+  ProjectFullStackRepositoryId:
+    Type: String
+    Description: GitHub repository for Full Stack project
+
+  ProjectFullStackConnectionArn:
+    Type: String
+    Description: CodeStar connection ARN for Full Stack project
+
+  # Container Configuration
+  PortfolioContainerName:
+    Type: String
+    Default: "portfolio-container"
+
+  Project1ContainerName:
+    Type: String
+    Default: "project1-container"
+
+  Project2ContainerName:
+    Type: String
+    Default: "project2-container"
+
+  ProjectFullStackContainerName:
+    Type: String
+    Default: "project-frontend-ecomm-container"
+
+  ProjectFullStackSecondaryContainerName:
+    Type: String
+    Default: "project-backend-ecomm-container"
+
+  # ECR Configuration
+  PortfolioECRRepository:
+    Type: String
+    Default: "portfolio-dev"
+
+  Project1ECRRepository:
+    Type: String
+    Default: "project1-dev"
+
+  Project2ECRRepository:
+    Type: String
+    Default: "project2-dev"
+
+  ProjectFullStackECRRepository:
+    Type: String
+    Default: "frontend-ecomm-dev"
+
+  ProjectFullStackSecondaryECRRepository:
+    Type: String
+    Default: "backend-ecomm-dev"
+
+Mappings:
+  CICDConfig:
+    dev:
+      CodeBuildComputeType: BUILD_GENERAL1_MEDIUM
+      EnableApprovals: false
+      ApprovalTimeoutInMinutes: 60
+    prod:
+      CodeBuildComputeType: BUILD_GENERAL1_LARGE
+      EnableApprovals: true
+      ApprovalTimeoutInMinutes: 120
+
+Resources:
+  CodePipelinePoliciesStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codepipeline-policies.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        ArtifactBucket: !Ref ArtifactBucket
+        ConnectionArn: !Ref PortfolioConnectionArn
+        TaskExecutionRoleArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-TaskExecutionRoleArn-${Environment}"
+        KMSKeyArn: !ImportValue 
+          Fn::Sub: "${ProjectName}-KMSKeyArn-${Environment}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "CICD"
+
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: CodePipelinePoliciesStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}pipelines/ci-cd-pipeline.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        ArtifactBucket: !Ref ArtifactBucket
+        TemplateBucket: !Ref TemplateBucket
+        ConnectionArn: !Ref PortfolioConnectionArn
+        CodeBuildComputeType: !FindInMap [CICDConfig, !Ref Environment, CodeBuildComputeType]
+        EnableApprovals: !FindInMap [CICDConfig, !Ref Environment, EnableApprovals]
+        ApprovalTimeoutInMinutes: !FindInMap [CICDConfig, !Ref Environment, ApprovalTimeoutInMinutes]
+        ProjectsConfig: !Sub |
+          [
+            {
+              "name": "Portfolio",
+              "repositoryId": "${PortfolioRepositoryId}",
+              "containerName": "${PortfolioContainerName}",
+              "serviceName": "portfolio-service",
+              "ecrRepository": "${PortfolioECRRepository}",
+              "projectType": "single-container",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            },
+            {
+              "name": "Project1",
+              "repositoryId": "${Project1RepositoryId}",
+              "containerName": "${Project1ContainerName}",
+              "serviceName": "project1-service",
+              "ecrRepository": "${Project1ECRRepository}",
+              "projectType": "single-container",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            },
+            {
+              "name": "Project2",
+              "repositoryId": "${Project2RepositoryId}",
+              "containerName": "${Project2ContainerName}",
+              "serviceName": "project2-service",
+              "ecrRepository": "${Project2ECRRepository}",
+              "projectType": "single-container",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            },
+            {
+              "name": "ProjectFullStack",
+              "repositoryId": "${ProjectFullStackRepositoryId}",
+              "containerName": "${ProjectFullStackContainerName}",
+              "serviceName": "fullstack-ecomm-service",
+              "ecrRepository": "${ProjectFullStackECRRepository}",
+              "secondaryContainerName": "${ProjectFullStackSecondaryContainerName}",
+              "secondaryServiceName": "backend-ecomm-service",
+              "secondaryEcrRepository": "${ProjectFullStackSecondaryECRRepository}",
+              "projectType": "full-stack",
+              "enabled": true,
+              "branches": {
+                "dev": "develop",
+                "staging": "staging",
+                "production": "main"
+              }
+            }
+          ]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "CICD"
+
+Outputs:
+  # Pipeline Outputs
+  CodePipelineServiceRoleArn:
+    Description: CodePipeline Service Role ARN
+    Value: !GetAtt CodePipelinePoliciesStack.Outputs.CodePipelineServiceRoleArn
+    Export:
+      Name: !Sub "${ProjectName}-CodePipelineServiceRoleArn-${Environment}"
+
+  PipelineArn:
+    Description: CI/CD Pipeline ARN
+    Value: !GetAtt PipelineStack.Outputs.PipelineArn
+    Export:
+      Name: !Sub "${ProjectName}-PipelineArn-${Environment}"
+
+  CodeBuildProjectArn:
+    Description: CodeBuild Project ARN
+    Value: !GetAtt PipelineStack.Outputs.CodeBuildProjectArn
+    Export:
+      Name: !Sub "${ProjectName}-CodeBuildProjectArn-${Environment}"

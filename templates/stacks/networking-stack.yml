@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Networking stack - VPC, Load Balancer, DNS, and SSL Certificates"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  TemplateBucket:
+    Type: String
+    Description: S3 Bucket containing the nested templates
+
+  TemplatePrefix:
+    Type: String
+    Description: Folder path for templates
+
+  # VPC Parameters
+  VpcCidr:
+    Type: String
+    Description: CIDR block for VPC
+    Default: "10.0.0.0/16"
+
+  # Domain Parameters
+  RootDomainName:
+    Type: String
+    Description: Root domain name
+
+  WWWDomainName:
+    Type: String
+    Description: WWW domain name
+
+  Project1Domain:
+    Type: String
+    Description: Project 1 domain name
+
+  Project2Domain:
+    Type: String
+    Description: Project 2 domain name
+
+  ProjectFrontendEcommDomain:
+    Type: String
+    Description: E-commerce frontend domain
+
+  ProjectBackendEcommDomain:
+    Type: String
+    Description: E-commerce backend domain
+
+  HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone ID
+
+  # Health Check Parameters
+  PortfolioHealthCheckPath:
+    Type: String
+    Default: "/"
+
+  Project1HealthCheckPath:
+    Type: String
+    Default: "/healthcheck"
+
+  Project2HealthCheckPath:
+    Type: String
+    Default: "/api/health"
+
+  EcommerceFrontendHealthCheckPath:
+    Type: String
+    Default: "/health"
+
+  EcommerceBackendHealthCheckPath:
+    Type: String
+    Default: "/api/health"
+
+Mappings:
+  NetworkingConfig:
+    dev:
+      EnableVpcFlowLogs: false
+      DefaultTTL: 60
+      EnvironmentPrefix: "dev."
+    prod:
+      EnableVpcFlowLogs: true
+      DefaultTTL: 300
+      EnvironmentPrefix: ""
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, "prod"]
+
+Resources:
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}core/vpc.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        VpcCidr: !Ref VpcCidr
+        EnableVpcFlowLogs: !FindInMap [NetworkingConfig, !Ref Environment, EnableVpcFlowLogs]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Networking"
+
+  SSLCertificateStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/ssl-certificate.yml"
+      Parameters:
+        Environment: !Ref Environment
+        HostedZoneId: !Ref HostedZoneId
+        PrimaryDomainName: !Ref RootDomainName
+        EnvironmentDomainPrefix: !FindInMap [NetworkingConfig, !Ref Environment, EnvironmentPrefix]
+        DomainsConfig: !Sub |
+          [
+            {
+              "name": "www",
+              "domain": "${WWWDomainName}",
+              "enabled": true
+            },
+            {
+              "name": "project1",
+              "domain": "${Project1Domain}",
+              "enabled": true
+            },
+            {
+              "name": "project2",
+              "domain": "${Project2Domain}",
+              "enabled": true
+            },
+            {
+              "name": "ecomm-frontend",
+              "domain": "${ProjectFrontendEcommDomain}",
+              "enabled": true
+            },
+            {
+              "name": "ecomm-backend",
+              "domain": "${ProjectBackendEcommDomain}",
+              "enabled": true
+            }
+          ]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Networking"
+
+  LoadBalancerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VPCStack
+      - SSLCertificateStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/application-load-balancer.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        LoadBalancerName: !Sub "${ProjectName}-ALB-${Environment}"
+        LoadBalancerSGCidrIp: "0.0.0.0/0"
+        SSLCertificateArn: !GetAtt SSLCertificateStack.Outputs.CertificateArn
+        EnableHTTPS: "true"
+        ServicesConfig: !Sub |
+          [
+            {
+              "name": "portfolio",
+              "port": 80,
+              "domains": ["${RootDomainName}", "${WWWDomainName}"],
+              "priority": 100,
+              "enabled": true,
+              "healthCheckPath": "${PortfolioHealthCheckPath}"
+            },
+            {
+              "name": "project1",
+              "port": 3000,
+              "domains": ["${Project1Domain}"],
+              "priority": 200,
+              "enabled": true,
+              "healthCheckPath": "${Project1HealthCheckPath}"
+            },
+            {
+              "name": "project2",
+              "port": 3001,
+              "domains": ["${Project2Domain}"],
+              "priority": 300,
+              "enabled": true,
+              "healthCheckPath": "${Project2HealthCheckPath}"
+            },
+            {
+              "name": "ecommerce-frontend",
+              "port": 3002,
+              "domains": ["${ProjectFrontendEcommDomain}"],
+              "priority": 400,
+              "enabled": true,
+              "healthCheckPath": "${EcommerceFrontendHealthCheckPath}"
+            },
+            {
+              "name": "ecommerce-backend",
+              "port": 4000,
+              "domains": ["${ProjectBackendEcommDomain}"],
+              "priority": 500,
+              "enabled": true,
+              "healthCheckPath": "${EcommerceBackendHealthCheckPath}"
+            }
+          ]
+        HealthCheckPath: "/"
+        HealthCheckIntervalSeconds: 30
+        HealthyThresholdCount: 2
+        UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Networking"
+
+  DNSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LoadBalancerStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}networking/dns-records.yml"
+      Parameters:
+        Environment: !Ref Environment
+        HostedZoneId: !Ref HostedZoneId
+        EnvironmentDomainPrefix: !FindInMap [NetworkingConfig, !Ref Environment, EnvironmentPrefix]
+        DefaultTTL: !FindInMap [NetworkingConfig, !Ref Environment, DefaultTTL]
+        DomainsConfig: !Sub |
+          [
+            {
+              "name": "root",
+              "domain": "${RootDomainName}",
+              "enabled": true,
+              "description": "Main portfolio site"
+            },
+            {
+              "name": "www",
+              "domain": "${WWWDomainName}",
+              "enabled": true,
+              "description": "WWW subdomain"
+            },
+            {
+              "name": "project1",
+              "domain": "${Project1Domain}",
+              "enabled": true,
+              "description": "Project 1 application"
+            },
+            {
+              "name": "project2", 
+              "domain": "${Project2Domain}",
+              "enabled": true,
+              "description": "Project 2 application"
+            },
+            {
+              "name": "ecomm-frontend",
+              "domain": "${ProjectFrontendEcommDomain}",
+              "enabled": true,
+              "description": "E-commerce frontend"
+            },
+            {
+              "name": "ecomm-backend",
+              "domain": "${ProjectBackendEcommDomain}",
+              "enabled": true,
+              "description": "E-commerce backend API"
+            }
+          ]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Networking"
+
+Outputs:
+  # VPC Outputs
+  VPCId:
+    Description: VPC ID
+    Value: !GetAtt VPCStack.Outputs.VPCId
+    Export:
+      Name: !Sub "${ProjectName}-VPCId-${Environment}"
+
+  PublicSubnet1:
+    Description: Public Subnet 1 ID
+    Value: !GetAtt VPCStack.Outputs.PublicSubnet1
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnet1-${Environment}"
+
+  PublicSubnet2:
+    Description: Public Subnet 2 ID
+    Value: !GetAtt VPCStack.Outputs.PublicSubnet2
+    Export:
+      Name: !Sub "${ProjectName}-PublicSubnet2-${Environment}"
+
+  PrivateSubnet1:
+    Description: Private Subnet 1 ID
+    Value: !GetAtt VPCStack.Outputs.PrivateSubnet1
+    Export:
+      Name: !Sub "${ProjectName}-PrivateSubnet1-${Environment}"
+
+  PrivateSubnet2:
+    Description: Private Subnet 2 ID
+    Value: !GetAtt VPCStack.Outputs.PrivateSubnet2
+    Export:
+      Name: !Sub "${ProjectName}-PrivateSubnet2-${Environment}"
+
+  # Load Balancer Outputs
+  LoadBalancerArn:
+    Description: Load Balancer ARN
+    Value: !GetAtt LoadBalancerStack.Outputs.LoadBalancerArn
+    Export:
+      Name: !Sub "${ProjectName}-LoadBalancerArn-${Environment}"
+
+  LoadBalancerDNSName:
+    Description: Load Balancer DNS Name
+    Value: !GetAtt LoadBalancerStack.Outputs.LoadBalancerDNSName
+    Export:
+      Name: !Sub "${ProjectName}-LoadBalancerDNSName-${Environment}"
+
+  LoadBalancerSecurityGroupId:
+    Description: Load Balancer Security Group ID
+    Value: !GetAtt LoadBalancerStack.Outputs.LoadBalancerSecurityGroupId
+    Export:
+      Name: !Sub "${ProjectName}-LoadBalancerSGId-${Environment}"
+
+  # Target Group ARNs
+  TargetGroupArn:
+    Description: Portfolio Target Group ARN
+    Value: !GetAtt LoadBalancerStack.Outputs.TargetGroupArn
+    Export:
+      Name: !Sub "${ProjectName}-TargetGroupArn-${Environment}"
+
+  Project1TargetGroupArn:
+    Description: Project1 Target Group ARN
+    Value: !GetAtt LoadBalancerStack.Outputs.Project1TargetGroupArn
+    Export:
+      Name: !Sub "${ProjectName}-Project1TargetGroupArn-${Environment}"
+
+  Project2TargetGroupArn:
+    Description: Project2 Target Group ARN
+    Value: !GetAtt LoadBalancerStack.Outputs.Project2TargetGroupArn
+    Export:
+      Name: !Sub "${ProjectName}-Project2TargetGroupArn-${Environment}"
+
+  ProjectFrontendEcommTargetGroupArn:
+    Description: Frontend E-commerce Target Group ARN
+    Value: !GetAtt LoadBalancerStack.Outputs.ProjectFrontendEcommTargetGroupArn
+    Export:
+      Name: !Sub "${ProjectName}-FrontendEcommTargetGroupArn-${Environment}"
+
+  ProjectBackendEcommTargetGroupArn:
+    Description: Backend E-commerce Target Group ARN
+    Value: !GetAtt LoadBalancerStack.Outputs.ProjectBackendEcommTargetGroupArn
+    Export:
+      Name: !Sub "${ProjectName}-BackendEcommTargetGroupArn-${Environment}"
+
+  # SSL Certificate
+  CertificateArn:
+    Description: SSL Certificate ARN
+    Value: !GetAtt SSLCertificateStack.Outputs.CertificateArn
+    Export:
+      Name: !Sub "${ProjectName}-CertificateArn-${Environment}"

@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Security stack - KMS, IAM Policies, and Security Groups"
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+  ProjectName:
+    Type: String
+    Description: Project name for resource naming
+    Default: "Portfolio"
+
+  TemplateBucket:
+    Type: String
+    Description: S3 Bucket containing the nested templates
+
+  TemplatePrefix:
+    Type: String
+    Description: Folder path for templates
+
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket for build artifacts
+
+  # Import VPC information
+  VPCId:
+    Type: String
+    Description: VPC ID from networking stack
+
+  LoadBalancerSecurityGroupId:
+    Type: String
+    Description: Load Balancer Security Group ID
+
+Mappings:
+  SecurityConfig:
+    dev:
+      KeyDeletionWindow: 7
+      EnableDatabaseAccess: true
+      LogSecurityEvents: false
+    prod:
+      KeyDeletionWindow: 30
+      EnableDatabaseAccess: false
+      LogSecurityEvents: true
+
+Resources:
+  KMSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/kms.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        KeyUsagePurpose: "General Application Encryption"
+        KeyDeletionWindow: !FindInMap [SecurityConfig, !Ref Environment, KeyDeletionWindow]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Security"
+
+  ECSPoliciesStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: KMSStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-policies.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
+        VPCId: !Ref VPCId
+        LogGroupPrefix: !Sub "/ecs/${ProjectName}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Security"
+
+  ECSSecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/ecs-security-groups.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        VPCId: !Ref VPCId
+        LoadBalancerSecurityGroupId: !Ref LoadBalancerSecurityGroupId
+        EnableDatabaseAccess: !FindInMap [SecurityConfig, !Ref Environment, EnableDatabaseAccess]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Security"
+
+  CodeBuildPoliciesStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: KMSStack
+    Properties:
+      TemplateURL: !Sub "https://${TemplateBucket}.s3.${AWS::Region}.amazonaws.com/${TemplatePrefix}security/codebuild-policies.yml"
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        ArtifactBucket: !Ref ArtifactBucket
+        KMSKeyArn: !GetAtt KMSStack.Outputs.KMSKeyArn
+        ProjectsConfig: !Sub |
+          [
+            {
+              "name": "Portfolio",
+              "ecrRepositories": ["portfolio-${Environment}"],
+              "enabled": true
+            },
+            {
+              "name": "Project1",
+              "ecrRepositories": ["project1-${Environment}"],
+              "enabled": true
+            },
+            {
+              "name": "Project2",
+              "ecrRepositories": ["project2-${Environment}"],
+              "enabled": true
+            },
+            {
+              "name": "ProjectFullStack",
+              "ecrRepositories": ["frontend-ecomm-${Environment}", "backend-ecomm-${Environment}"],
+              "enabled": true
+            }
+          ]
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: StackType
+          Value: "Security"
+
+Outputs:
+  # KMS Outputs
+  KMSKeyArn:
+    Description: KMS Key ARN
+    Value: !GetAtt KMSStack.Outputs.KMSKeyArn
+    Export:
+      Name: !Sub "${ProjectName}-KMSKeyArn-${Environment}"
+
+  KMSKeyId:
+    Description: KMS Key ID
+    Value: !GetAtt KMSStack.Outputs.KMSKeyId
+    Export:
+      Name: !Sub "${ProjectName}-KMSKeyId-${Environment}"
+
+  # ECS Role Outputs
+  TaskExecutionRoleArn:
+    Description: ECS Task Execution Role ARN
+    Value: !GetAtt ECSPoliciesStack.Outputs.TaskExecutionRoleArn
+    Export:
+      Name: !Sub "${ProjectName}-TaskExecutionRoleArn-${Environment}"
+
+  TaskRoleArn:
+    Description: ECS Task Role ARN
+    Value: !GetAtt ECSPoliciesStack.Outputs.TaskRoleArn
+    Export:
+      Name: !Sub "${ProjectName}-TaskRoleArn-${Environment}"
+
+  ServiceRoleArn:
+    Description: ECS Service Role ARN
+    Value: !GetAtt ECSPoliciesStack.Outputs.ServiceRoleArn
+    Export:
+      Name: !Sub "${ProjectName}-ServiceRoleArn-${Environment}"
+
+  # Security Group Outputs
+  ECSTaskSecurityGroupId:
+    Description: ECS Task Security Group ID
+    Value: !GetAtt ECSSecurityGroupsStack.Outputs.ECSTaskSecurityGroupId
+    Export:
+      Name: !Sub "${ProjectName}-ECSTaskSecurityGroupId-${Environment}"
+
+  ECSInstanceSecurityGroupId:
+    Description: ECS Instance Security Group ID
+    Value: !GetAtt ECSSecurityGroupsStack.Outputs.ECSInstanceSecurityGroupId
+    Export:
+      Name: !Sub "${ProjectName}-ECSInstanceSecurityGroupId-${Environment}"
+
+  DatabaseSecurityGroupId:
+    Description: Database Security Group ID
+    Value: !GetAtt ECSSecurityGroupsStack.Outputs.DatabaseSecurityGroupId
+    Export:
+      Name: !Sub "${ProjectName}-DatabaseSecurityGroupId-${Environment}"
+
+  # CodeBuild Role Outputs
+  CodeBuildServiceRoleArn:
+    Description: CodeBuild Service Role ARN
+    Value: !GetAtt CodeBuildPoliciesStack.Outputs.CodeBuildServiceRoleArn
+    Export:
+      Name: !Sub "${ProjectName}-CodeBuildServiceRoleArn-${Environment}"
