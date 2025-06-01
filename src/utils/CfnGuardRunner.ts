@@ -79,8 +79,37 @@ export class CfnGuardRunner {
     });
   }
 
+  /**
+   * Parses the output from cfn-guard to extract errors and determine success.
+   * @param stdout - The standard output from the command execution.
+   * @param stderr - The standard error output from the command execution.
+   * @returns An object containing an array of errors and a success flag.
+   */
+
   private parseOutput(
     stdout: string,
     stderr: string
-  ): { errors: string[]; success: boolean };
+  ): { errors: string[]; success: boolean } {
+    const errors: string[] = [];
+    if (stderr) {
+      errors.push(stderr.trim());
+    }
+    if (stdout) {
+      const lines = stdout.split("\n");
+      lines.forEach((line) => {
+        if (
+          line.includes("ERROR") ||
+          line.includes("FAIL") ||
+          line.includes("VIOLATION")
+        ) {
+          const errorMessage = line.trim();
+          if (errorMessage) {
+            errors.push(errorMessage);
+          }
+        }
+      });
+    }
+    const success = errors.length === 0;
+    return { errors, success };
+  }
 }
