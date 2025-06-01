@@ -7,6 +7,7 @@ export interface ValidationResult {
   exitCode: number;
   duration: number;
   errors: string[];
+  rules: string[];
 }
 
 export interface GuardRule {

@@ -30,6 +30,7 @@ export class CfnGuardRunner {
       tool: "cfn-guard",
       duration: Date.now() - startTime, // Duration can be calculated if needed
       errors: parsedOutput.errors,
+      rules: rulesPath,
     };
     return result;
   }

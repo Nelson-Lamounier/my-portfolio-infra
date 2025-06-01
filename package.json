@@ -8,7 +8,11 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "validate:template": "ts-node --files ./scripts/validate-template.ts",
-    "validate:template:watch": "ts-node scripts?validate-all.ts"
+    "validate:template:watch": "ts-node scripts?validate-all.ts",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration",
+    "test:cfn-guard": "jest tests/integration --testTimeout=30000 --verbose",
+    "test:all": "jest"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
