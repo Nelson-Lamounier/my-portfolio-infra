@@ -1,0 +1,23 @@
+{
+  "name": "portfolio-cfn-infrastructure",
+  "version": "1.0.0",
+  "packageManager": "yarn@4.9.1",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "validate:template": "ts-node --files ./scripts/validate-template.ts",
+    "validate:template:watch": "ts-node scripts?validate-all.ts"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.15.29",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.4",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "chalk": "4.1.0",
+    "ts-node": "^10.9.2"
+  }
+}
