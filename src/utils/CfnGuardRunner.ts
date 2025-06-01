@@ -13,13 +13,14 @@ export class CfnGuardRunner {
     templatePath: string,
     rulesPath: string[]
   ): Promise<ValidationResult> {
+    const startTime = Date.now();
     const command = this.buildCommand(templatePath, rulesPath);
     const executionResult = await this.executeCommand(command);
     const parsedOutput = this.parseOutput(
       executionResult.stdout,
       executionResult.stderr
     );
-    const startTime = Date.now();
+
     const result: ValidationResult = {
       success: parsedOutput.success && executionResult.exitCode === 0,
       template: templatePath,
@@ -40,7 +41,7 @@ export class CfnGuardRunner {
    */
   private buildCommand(templatePath: string, rulesPath: string[]): string[] {
     const command = ["cfn-guard", "validate"];
-    command.push("--date", templatePath);
+    command.push("--data", templatePath);
     rulesPath.forEach((rulesPath) => {
       command.push("--rules", rulesPath);
     });

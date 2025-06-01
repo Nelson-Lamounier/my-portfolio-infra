@@ -6,6 +6,7 @@
     "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "validate:template": "ts-node --files ./scripts/validate-template.ts",
     "validate:template:watch": "ts-node scripts?validate-all.ts"
   },
