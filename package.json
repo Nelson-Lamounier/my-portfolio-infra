@@ -12,6 +12,9 @@
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
     "test:cfn-guard": "jest tests/integration --testTimeout=30000 --verbose",
+    "test:production": "jest tests/integration/production-validation.test.ts --testTimeout=60000 --verbose",
+    "test:discover": "jest tests/integration/cloudformation-validation.integration.test.ts --verbose",
+    "discover:templates": "ts-node scripts/validation/discover-templates.ts",
     "test:all": "jest"
   },
   "devDependencies": {
