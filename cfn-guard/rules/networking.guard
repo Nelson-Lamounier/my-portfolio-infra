@@ -1,0 +1,400 @@
+#
+# Networking Security Rules for Portfolio Infrastructure
+# Purpose: VPC, ALB, SSL, DNS security
+# Services: ALB, Target Groups, Security Groups, Route53, ACM
+#
+
+# =============================================================================
+# VARIABLE DEFINITIONS
+# =============================================================================
+
+let security_groups = Resources.*[ Type == 'AWS::EC2::SecurityGroup' ]
+let load_balancers = Resources.*[ Type == 'AWS::ElasticLoadBalancingV2::LoadBalancer' ]
+let target_groups = Resources.*[ Type == 'AWS::ElasticLoadBalancingV2::TargetGroup' ]
+let listeners = Resources.*[ Type == 'AWS::ElasticLoadBalancingV2::Listener' ]
+let route53_records = Resources.*[ Type == 'AWS::Route53::RecordSet' ]
+let acm_certificates = Resources.*[ Type == 'AWS::CertificateManager::Certificate' ]
+
+# =============================================================================
+# SECURITY GROUP VALIDATION
+# =============================================================================
+
+rule security_groups_no_unrestricted_access when %security_groups !empty {
+    %security_groups.Properties.SecurityGroupIngress[*] {
+        when CidrIp == "0.0.0.0/0" {
+            FromPort != 22 << SSH (22) should not be open to the internet >>
+            FromPort != 3389 << RDP (3389) should not be open to the internet >>
+            FromPort != 1433 << SQL Server (1433) should not be open to the internet >>
+            FromPort != 3306 << MySQL (3306) should not be open to the internet >>
+            FromPort != 5432 << PostgreSQL (5432) should not be open to the internet >>
+        }
+    }
+}
+
+rule security_groups_require_descriptions when %security_groups !empty {
+    %security_groups.Properties {
+        VpcId exists << Security groups must be in a VPC >>
+        SecurityGroupIngress[*] {
+            Description exists << All ingress rules must have descriptions >>
+            Description != "" << Rule descriptions cannot be empty >>
+        }
+    }
+}
+
+# =============================================================================
+# LOAD BALANCER SECURITY
+# =============================================================================
+
+rule alb_access_logging_enabled when %load_balancers !empty {
+    %load_balancers.Properties.LoadBalancerAttributes[*] {
+        when Key == "access_logs.s3.enabled" {
+            Value == "true" << ALB access logging should be enabled >>
+        }
+    }
+}
+
+rule https_listeners_ssl_policy when %listeners !empty {
+    %listeners.Properties {
+        when Protocol == "HTTPS" {
+            SslPolicy exists << HTTPS listeners must specify SSL policy >>
+            SslPolicy == /^ELBSecurityPolicy-TLS.*/ << Use modern TLS security policies >>
+            CertificateArn exists << HTTPS listeners must have SSL certificates >>
+        }
+    }
+}
+
+rule http_redirect_to_https when %listeners !empty {
+    %listeners.Properties {
+        when Protocol == "HTTP" and Port == 80 {
+            DefaultActions[*] {
+                Type == "redirect" << HTTP should redirect to HTTPS >>
+                RedirectConfig.Protocol == "HTTPS" << Redirect to HTTPS protocol >>
+                RedirectConfig.StatusCode == "HTTP_301" << Use permanent redirect >>
+            }
+        }
+    }
+}
+
+# =============================================================================
+# TARGET GROUP HEALTH CHECKS
+# =============================================================================
+
+rule target_groups_health_checks when %target_groups !empty {
+    %target_groups.Properties {
+        HealthCheckPath exists << Target groups must have health check paths >>
+        HealthCheckPath != "/" << Use specific health check endpoints >>
+        HealthCheckIntervalSeconds <= 30 << Health check intervals should be reasonable >>
+        HealthyThresholdCount >= 2 << Healthy threshold should be at least 2 >>
+        UnhealthyThresholdCount <= 5 << Unhealthy threshold should not exceed 5 >>
+    }
+}
+
+# =============================================================================
+# SSL/TLS CERTIFICATE MANAGEMENT
+# =============================================================================
+
+rule acm_dns_validation when %acm_certificates !empty {
+    %acm_certificates.Properties {
+        ValidationMethod == "DNS" << Use DNS validation for certificates >>
+        DomainValidationOptions exists << DNS validation requires domain options >>
+        DomainValidationOptions[*] {
+            DomainName exists << Domain name must be specified >>
+            HostedZoneId exists << Hosted zone ID must be specified >>
+        }
+    }
+}
+
+# =============================================================================
+# DNS AND ROUTE 53
+# =============================================================================
+
+rule route53_alias_preferred when %route53_records !empty {
+    %route53_records.Properties {
+        when Type == "A" {
+            AliasTarget exists << A records should use alias targets for AWS resources >>
+        }
+        when AliasTarget exists {
+            AliasTarget.DNSName != "" << Alias target DNS name cannot be empty >>
+            AliasTarget.HostedZoneId != "" << Alias target hosted zone ID required >>
+        }
+    }
+}
+
+#
+# Networking Security Rules
+# Purpose: General networking security
+# Services: EC2, VPC, Route53, ACM
+#
+
+# =============================================================================
+# VARIABLE DEFINITIONS
+# =============================================================================
+
+let ec2_instances = Resources.*[ Type == 'AWS::EC2::Instance' ]
+let vpcs = Resources.*[ Type == 'AWS::EC2::VPC' ]
+let subnets = Resources.*[ Type == 'AWS::EC2::Subnet' ]
+let route_tables = Resources.*[ Type == 'AWS::EC2::RouteTable' ]
+let internet_gateways = Resources.*[ Type == 'AWS::EC2::InternetGateway' ]
+let flow_logs = Resources.*[ Type == 'AWS::EC2::FlowLog' ]
+let r53_health_checks = Resources.*[ Type == 'AWS::Route53::HealthCheck' ]
+let r53_record_sets = Resources.*[ Type == 'AWS::Route53::RecordSet' ]
+let acm_certs = Resources.*[ Type == 'AWS::CertificateManager::Certificate' ]
+
+# =============================================================================
+# EC2 INSTANCE SECURITY
+# =============================================================================
+
+rule ec2_instance_no_public_ip when %ec2_instances !empty {
+    %ec2_instances.Properties {
+        NetworkInterfaces[*] {
+            AssociatePublicIpAddress == false << EC2 instances should not have public IPs >>
+        }
+    }
+}
+
+rule ec2_instance_ssh_key_pair when %ec2_instances !empty {
+    %ec2_instances.Properties {
+        KeyName exists << EC2 instances should have an SSH key pair specified >>
+        KeyName != "" << EC2 instance SSH key pair cannot be empty >>
+    }
+}
+
+rule ec2_instance_ebs_encryption when %ec2_instances !empty {
+    %ec2_instances.Properties {
+        BlockDeviceMappings[*] {
+            Ebs {
+                Encrypted == true << EBS volumes should be encrypted >>
+            }
+        }
+    }
+}
+
+# =============================================================================
+# VPC SECURITY
+# =============================================================================
+
+rule vpc_dns_support_enabled when %vpcs !empty {
+    %vpcs.Properties {
+        EnableDnsSupport == true << VPC DNS support should be enabled >>
+        EnableDnsHostnames == true << VPC DNS hostnames should be enabled >>
+    }
+}
+
+rule vpc_cidr_block when %vpcs !empty {
+    %vpcs.Properties {
+        CidrBlock exists << VPC CIDR block must be specified >>
+        CidrBlock in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] or
+        CidrBlock == /^10\..*/ or
+        CidrBlock == /^172\.(1[6-9]|2[0-9]|3[0-1])\..*/ or
+        CidrBlock == /^192\.168\..*/ << VPC should use private IP ranges (RFC 1918) >>
+    }
+}
+
+rule vpc_flow_logs_enabled when %vpcs !empty {
+    %vpcs.Properties {
+        FlowLogs[*] {
+            LogGroupName exists << VPC flow logs must have a log group specified >>
+            TrafficType == "ALL" << VPC flow logs should capture all traffic >>
+        }
+    }
+}
+
+# =============================================================================
+# SUBNET SECURITY
+# =============================================================================
+
+rule subnet_public_ip_assignment when %subnets !empty {
+    %subnets.Properties {
+        MapPublicIpOnLaunch exists << Subnet public IP assignment should be explicitly configured >>
+        MapPublicIpOnLaunch == false << Subnets should not auto-assign public IPs >>
+    }
+}
+
+rule subnet_cidr_block when %subnets !empty {
+    %subnets.Properties {
+        CidrBlock exists << Subnet CIDR block must be specified >>
+        CidrBlock != "" << Subnet CIDR block cannot be empty >>
+    }
+}
+
+rule subnet_vpc_association when %subnets !empty {
+    %subnets.Properties {
+        VpcId exists << Subnet must be associated with a VPC >>
+        VpcId != "" << VPC ID cannot be empty >>
+    }
+}
+
+# =============================================================================
+# ROUTE TABLE SECURITY
+# =============================================================================
+
+rule route_table_vpc_association when %route_tables !empty {
+    %route_tables.Properties {
+        VpcId exists << Route table must be associated with a VPC >>
+        VpcId != "" << VPC ID cannot be empty >>
+    }
+}
+
+rule internet_gateway_route_table_association when %route_tables !empty {
+    %route_tables.Properties {
+        RouteTableId exists << Route table must be associated with a route >>
+    }
+}
+
+# =============================================================================
+# INTERNET GATEWAY SECURITY
+# =============================================================================
+
+rule internet_gateway_vpc_attachment when %internet_gateways !empty {
+    %internet_gateways.Properties {
+        VpcId exists << Internet Gateway must be attached to a VPC >>
+        VpcId != "" << VPC ID cannot be empty >>
+    }
+}
+
+# =============================================================================
+# FLOW LOG SECURITY
+# =============================================================================
+
+rule flow_log_vpc_association when %flow_logs !empty {
+    %flow_logs.Properties {
+        ResourceId exists << Flow log must be associated with a resource (VPC, subnet, or network interface) >>
+        ResourceType in ["VPC", "Subnet", "NetworkInterface"] << Flow log must specify valid resource type >>
+    }
+}
+
+# =============================================================================
+# ROUTE 53 DNS SECURITY
+# =============================================================================
+
+rule route53_alias_records_preferred {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.Type == "A" or Properties.Type == "AAAA" {
+            Properties {
+                AliasTarget exists << A/AAAA records should use alias targets when pointing to AWS resources >>
+                AliasTarget.DNSName exists << Alias target must specify DNS name >>
+                AliasTarget.HostedZoneId exists << Alias target must specify hosted zone ID >>
+            }
+        }
+    }
+}
+
+rule route53_evaluate_target_health {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        when Properties.AliasTarget exists {
+            Properties.AliasTarget {
+                EvaluateTargetHealth exists << Alias records should configure health evaluation >>
+                EvaluateTargetHealth == true << Target health evaluation should be enabled for reliability >>
+            }
+        }
+    }
+}
+
+rule route53_health_checks_secure_protocol {
+    Resources.*[ Type == "AWS::Route53::HealthCheck" ] {
+        Properties {
+            Type exists << Health check type must be specified >>
+            Type in ["HTTPS", "HTTPS_STR_MATCH", "TCP"] << Use secure protocols for health checks >>
+            when Type == "HTTPS" or Type == "HTTPS_STR_MATCH" {
+                Port == 443 << HTTPS health checks should use port 443 >>
+            }
+        }
+    }
+}
+
+rule route53_health_check_path_security {
+    Resources.*[ Type == "AWS::Route53::HealthCheck" ] {
+        Properties {
+            when ResourcePath exists {
+                ResourcePath != "/" << Health check should use specific path, not root >>
+                ResourcePath == /^\/health.*/ or 
+                ResourcePath == /^\/status.*/ or 
+                ResourcePath == /^\/ping.*/ << Health check should use dedicated health endpoint >>
+            }
+        }
+    }
+}
+
+rule route53_dns_record_naming_security {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        Properties {
+            Name exists << DNS record must specify name >>
+            Name != "" << DNS record name cannot be empty >>
+            # Avoid wildcard DNS records for security
+            Name != /^\*\..*/ << Avoid wildcard DNS records for security >>
+        }
+    }
+}
+
+rule hosted_zone_id_validation {
+    Resources.*[ Type == "AWS::Route53::RecordSet" ] {
+        Properties {
+            HostedZoneId exists << DNS records must specify hosted zone ID >>
+            HostedZoneId != "" << Hosted zone ID cannot be empty >>
+            HostedZoneId == /^Z[A-Z0-9]+$/ << Hosted zone ID should follow AWS format >>
+        }
+    }
+}
+
+# =============================================================================
+# SSL CERTIFICATE NETWORKING SECURITY RULES
+# =============================================================================
+
+rule acm_domain_name_validation {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            DomainName exists << SSL certificate must specify primary domain name >>
+            DomainName != "" << Primary domain name cannot be empty >>
+            DomainName == /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/ << Domain name must be valid format >>
+        }
+    }
+}
+
+rule acm_subject_alternative_names_validation {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        when Properties.SubjectAlternativeNames exists {
+            Properties.SubjectAlternativeNames[*] {
+                # Each SAN should be a valid domain name
+                this == /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/ or
+                this == /^\*\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/ << SAN must be valid domain or wildcard format >>
+            }
+        }
+    }
+}
+
+rule acm_avoid_dangerous_domains {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            # Avoid potentially dangerous or internal domains
+            DomainName != /.*\.local$/ << Avoid .local domains in certificates >>
+            DomainName != /.*\.localhost$/ << Avoid localhost domains in certificates >>
+            DomainName != /.*\.internal$/ << Avoid .internal domains in certificates >>
+            when SubjectAlternativeNames exists {
+                SubjectAlternativeNames[*] {
+                    this != /.*\.local$/ << Avoid .local domains in SANs >>
+                    this != /.*\.localhost$/ << Avoid localhost domains in SANs >>
+                    this != /.*\.internal$/ << Avoid .internal domains in SANs >>
+                }
+            }
+        }
+    }
+}
+
+rule acm_certificate_region_consideration {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties {
+            # ACM certificates for CloudFront must be in us-east-1
+            Tags exists << SSL certificates should have tags indicating intended use >>
+        }
+    }
+}
+
+rule acm_domain_validation_security {
+    Resources.*[ Type == "AWS::CertificateManager::Certificate" ] {
+        Properties.DomainValidationOptions[*] {
+            # Ensure domain validation uses owned hosted zones
+            HostedZoneId == /^Z[A-Z0-9]+$/ << Hosted zone ID should follow AWS format >>
+            DomainName == /^[a-zA-Z0-9].*/ << Domain names should start with alphanumeric character >>
+        }
+    }
+}

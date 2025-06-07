@@ -1,5 +1,0 @@
-rules:
-  - rule: "HelloWorldRule"
-    description: "A simple test rule to validate the guard functionality."
-    condition: "true"
-    message: "Hello World Rule Passed!"

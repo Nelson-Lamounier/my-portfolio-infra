@@ -92,9 +92,14 @@ describe("CloudFormation Validation Engine", () => {
         Logger.testEnd(testName, true, duration, "HEALTH");
       } catch (error) {
         const duration = Date.now() - startTime;
+
+        // ✅ FIX: Type guard for error handling
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+
         Logger.warn(
           "CFN Guard rules not available - validation will be limited",
-          error
+          errorMessage
         );
         Logger.testEnd(testName, false, duration, "HEALTH");
         expect(true).toBe(true); // Don't fail completely
@@ -113,7 +118,6 @@ describe("CloudFormation Validation Engine", () => {
         return;
       }
 
-      // Test validation with a single template
       const testTemplate = validationTargets[0];
 
       try {
@@ -130,8 +134,8 @@ describe("CloudFormation Validation Engine", () => {
           template: testTemplate.templateName,
         });
 
-        expect(result.duration).toBeLessThan(30000); // Should complete within 30s
-        expect(result.rulesApplied).toBeGreaterThan(0); // Should apply some rules
+        expect(result.duration).toBeLessThan(30000);
+        expect(result.rulesApplied).toBeGreaterThan(0);
 
         Logger.success("Validation engine is functional");
 
@@ -139,9 +143,16 @@ describe("CloudFormation Validation Engine", () => {
         Logger.testEnd(testName, true, duration, "HEALTH");
       } catch (error) {
         const duration = Date.now() - startTime;
-        Logger.error("Validation engine test failed", error);
+
+        // ✅ FIX: Type guard for error handling
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        const errorDetails =
+          error instanceof Error ? error : new Error(String(error));
+
+        Logger.error("Validation engine test failed", errorMessage);
         Logger.testEnd(testName, false, duration, "HEALTH");
-        throw error;
+        throw errorDetails;
       }
     });
   });
@@ -159,7 +170,7 @@ describe("CloudFormation Validation Engine", () => {
           "Available templates:",
           validationTargets.map((t) => t.templateName)
         );
-        expect(true).toBe(true); // Don't fail, but flag for attention
+        expect(true).toBe(true);
       });
     } else {
       test.each(criticalTemplates)(
@@ -187,7 +198,6 @@ describe("CloudFormation Validation Engine", () => {
               rulesApplied: result.rulesApplied,
             });
 
-            // Critical templates MUST pass
             expect(result.success).toBe(true);
             expect(result.guardErrors.length).toBeLessThanOrEqual(
               maxAllowedErrors
@@ -197,12 +207,19 @@ describe("CloudFormation Validation Engine", () => {
             Logger.testEnd(testName, result.success, duration, "CRITICAL");
           } catch (error) {
             const duration = Date.now() - startTime;
+
+            // ✅ FIX: Type guard for error handling
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            const errorDetails =
+              error instanceof Error ? error : new Error(String(error));
+
             Logger.error(
               `Critical validation failed for ${templateName}`,
-              error
+              errorMessage
             );
             Logger.testEnd(testName, false, duration, "CRITICAL");
-            throw error;
+            throw errorDetails;
           }
         }
       );
@@ -211,13 +228,12 @@ describe("CloudFormation Validation Engine", () => {
 
   // ===== PARAMETERIZED TEMPLATE VALIDATION =====
   describe("Template Validation Suite", () => {
-    // Add this safety check before test.each
     if (validationTargets.length === 0) {
       it("should identify templates for validation", () => {
         Logger.warn("No validation targets available");
         Logger.info("Check if templates were discovered correctly");
         Logger.info("Available domains:", Object.keys(templatesByDomain));
-        expect(true).toBe(true); // Don't fail completely, but flag the issue
+        expect(true).toBe(true);
       });
     } else {
       test.each(validationTargets)(
@@ -280,7 +296,12 @@ describe("CloudFormation Validation Engine", () => {
             );
           } catch (error) {
             const duration = Date.now() - startTime;
-            Logger.error(`Validation failed for ${templateName}`, error);
+
+            // ✅ FIX: Type guard for error handling
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+
+            Logger.error(`Validation failed for ${templateName}`, errorMessage);
             Logger.testEnd(testName, false, duration, priority.toUpperCase());
 
             // Handle CFN Guard configuration issues gracefully
@@ -290,7 +311,9 @@ describe("CloudFormation Validation Engine", () => {
               );
               expect(true).toBe(true);
             } else {
-              throw error;
+              const errorDetails =
+                error instanceof Error ? error : new Error(String(error));
+              throw errorDetails;
             }
           }
         }
@@ -318,8 +341,7 @@ describe("CloudFormation Validation Engine", () => {
 
         Logger.testStart(testName, "DOMAIN");
 
-        // Test domain-specific rule application
-        const testTemplate = domainTemplates[0]; // Test first template in domain
+        const testTemplate = domainTemplates[0];
         const domainRules = getDomainSpecificRules(domain);
 
         try {
@@ -342,9 +364,14 @@ describe("CloudFormation Validation Engine", () => {
           Logger.testEnd(testName, true, duration, "DOMAIN");
         } catch (error) {
           const duration = Date.now() - startTime;
-          Logger.warn(`Domain rule testing failed for ${domain}`, error);
+
+          // ✅ FIX: Type guard for error handling
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+
+          Logger.warn(`Domain rule testing failed for ${domain}`, errorMessage);
           Logger.testEnd(testName, false, duration, "DOMAIN");
-          expect(true).toBe(true); // Don't fail completely
+          expect(true).toBe(true);
         }
       }
     );
@@ -386,8 +413,12 @@ describe("CloudFormation Validation Engine", () => {
             categories: result.securityCategories,
           });
         } catch (error) {
+          // ✅ FIX: Type guard for error handling
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
           Logger.warn(
-            `Security validation failed for ${template.templateName}`
+            `Security validation failed for ${template.templateName}`,
+            errorMessage
           );
         }
       }
@@ -401,7 +432,7 @@ describe("CloudFormation Validation Engine", () => {
         averageIssues: Math.round(avgSecurityIssues * 100) / 100,
       });
 
-      expect(avgSecurityIssues).toBeLessThan(5); // Security should be good
+      expect(avgSecurityIssues).toBeLessThan(5);
 
       const duration = Date.now() - startTime;
       Logger.testEnd(testName, avgSecurityIssues < 5, duration, "SECURITY");

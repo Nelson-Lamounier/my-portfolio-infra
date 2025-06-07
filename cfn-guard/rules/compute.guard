@@ -1,0 +1,135 @@
+#
+# Compute Security Rules for Portfolio Infrastructure
+# Purpose: ECS, EC2, Auto Scaling security
+# Services: ECS, EC2, Auto Scaling Groups, Launch Templates
+#
+
+# =============================================================================
+# VARIABLE DEFINITIONS
+# =============================================================================
+
+let ecs_clusters = Resources.*[ Type == 'AWS::ECS::Cluster' ]
+let ecs_services = Resources.*[ Type == 'AWS::ECS::Service' ]
+let ecs_task_definitions = Resources.*[ Type == 'AWS::ECS::TaskDefinition' ]
+let auto_scaling_groups = Resources.*[ Type == 'AWS::AutoScaling::AutoScalingGroup' ]
+let launch_templates = Resources.*[ Type == 'AWS::EC2::LaunchTemplate' ]
+let ec2_instances = Resources.*[ Type == 'AWS::EC2::Instance' ]
+
+# =============================================================================
+# ECS SECURITY
+# =============================================================================
+
+rule ecs_task_no_privileged_containers when %ecs_task_definitions !empty {
+    %ecs_task_definitions.Properties.ContainerDefinitions[*] {
+        Privileged not exists or Privileged == false << Containers should not run in privileged mode >>
+    }
+}
+
+rule ecs_task_logging_configuration when %ecs_task_definitions !empty {
+    %ecs_task_definitions.Properties.ContainerDefinitions[*] {
+        when Essential == true {
+            LogConfiguration exists << Essential containers must have logging configured >>
+            LogConfiguration.LogDriver == "awslogs" << Use CloudWatch Logs driver >>
+        }
+    }
+}
+
+rule ecs_task_user_security when %ecs_task_definitions !empty {
+    %ecs_task_definitions.Properties.ContainerDefinitions[*] {
+        when User exists {
+            User != "0" << Containers should not run as UID 0 >>
+            User != "root" << Containers should not run as root >>
+        }
+    }
+}
+
+rule ecs_service_deployment_configuration when %ecs_services !empty {
+    %ecs_services.Properties {
+        when DeploymentConfiguration exists {
+            DeploymentConfiguration {
+                when DeploymentCircuitBreaker exists {
+                    DeploymentCircuitBreaker.Enable == true << Enable circuit breaker for deployment safety >>
+                    DeploymentCircuitBreaker.Rollback == true << Enable automatic rollback on failure >>
+                }
+            }
+        }
+    }
+}
+
+rule ecs_service_network_security when %ecs_services !empty {
+    %ecs_services.Properties {
+        when NetworkConfiguration.AwsvpcConfiguration exists {
+            NetworkConfiguration.AwsvpcConfiguration {
+                Subnets exists << ECS services must specify subnets >>
+                Subnets != [] << Subnets list cannot be empty >>
+                SecurityGroups exists << ECS services must specify security groups >>
+                SecurityGroups != [] << Security groups list cannot be empty >>
+            }
+        }
+    }
+}
+
+# =============================================================================
+# EC2 AND LAUNCH TEMPLATE SECURITY
+# =============================================================================
+
+rule launch_template_imdsv2_required when %launch_templates !empty {
+    %launch_templates.Properties.LaunchTemplateData {
+        MetadataOptions exists << Launch templates must configure metadata options >>
+        MetadataOptions {
+            HttpTokens == "required" << IMDSv2 must be required for security >>
+            HttpEndpoint == "enabled" << Metadata endpoint should be enabled >>
+        }
+    }
+}
+
+rule launch_template_user_data_no_secrets when %launch_templates !empty {
+    %launch_templates.Properties.LaunchTemplateData {
+        when UserData exists {
+            UserData != /.*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*/ << User data should not contain passwords >>
+            UserData != /.*[Aa][Cc][Cc][Ee][Ss][Ss].*[Kk][Ee][Yy].*/ << User data should not contain access keys >>
+            UserData != /.*[Ss][Ee][Cc][Rr][Ee][Tt].*/ << User data should not contain secrets >>
+        }
+    }
+}
+
+rule launch_template_ebs_encryption when %launch_templates !empty {
+    %launch_templates.Properties.LaunchTemplateData {
+        when BlockDeviceMappings exists {
+            BlockDeviceMappings[*] {
+                when Ebs exists {
+                    Ebs.Encrypted == true << All EBS volumes must be encrypted >>
+                    Ebs.DeleteOnTermination == true << Enable delete on termination for cost savings >>
+                }
+            }
+        }
+    }
+}
+
+rule launch_template_key_pair_environment_specific when %launch_templates !empty {
+    %launch_templates.Properties.LaunchTemplateData {
+        when KeyName exists {
+            KeyName != "" << Key pair name cannot be empty >>
+            KeyName == /.*-(dev|staging|production).*/ << Key pair should be environment-specific >>
+        }
+    }
+}
+
+# =============================================================================
+# AUTO SCALING SECURITY
+# =============================================================================
+
+rule asg_health_check_configuration when %auto_scaling_groups !empty {
+    %auto_scaling_groups.Properties {
+        HealthCheckGracePeriod exists << Auto scaling groups must have health check grace period >>
+        HealthCheckGracePeriod >= 300 << Health check grace period should be at least 5 minutes >>
+        HealthCheckType in ["EC2", "ELB"] << Use EC2 or ELB health checks >>
+    }
+}
+
+rule asg_launch_template_preferred when %auto_scaling_groups !empty {
+    %auto_scaling_groups.Properties {
+        LaunchTemplate exists << Use Launch Template instead of deprecated Launch Configuration >>
+        LaunchConfigurationName not exists << Launch Configuration is deprecated >>
+    }
+}

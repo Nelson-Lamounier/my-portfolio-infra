@@ -1,0 +1,104 @@
+#
+# Baseline Security Rules for Portfolio Infrastructure
+# Purpose: Core security fundamentals and best practices
+# Services: S3, KMS, CloudWatch, Cost Optimization
+#
+
+# =============================================================================
+# S3 SECURITY FUNDAMENTALS
+# =============================================================================
+
+let s3_buckets = Resources.*[ Type == 'AWS::S3::Bucket' ]
+
+rule s3_versioning_enabled when %s3_buckets !empty {
+    %s3_buckets.Properties {
+        VersioningConfiguration exists << S3 buckets must have versioning configuration >>
+        VersioningConfiguration.Status == "Enabled" << S3 versioning must be enabled for data protection >>
+    }
+}
+
+rule s3_public_access_blocked when %s3_buckets !empty {
+    %s3_buckets.Properties {
+        PublicAccessBlockConfiguration exists << S3 buckets must block public access >>
+        PublicAccessBlockConfiguration {
+            BlockPublicAcls == true << Block public ACLs >>
+            BlockPublicPolicy == true << Block public bucket policies >>
+            IgnorePublicAcls == true << Ignore public ACLs >>
+            RestrictPublicBuckets == true << Restrict public bucket access >>
+        }
+    }
+}
+
+# =============================================================================
+# ENCRYPTION AND KMS
+# =============================================================================
+
+let kms_keys = Resources.*[ Type == 'AWS::KMS::Key' ]
+
+rule kms_keys_rotation_enabled when %kms_keys !empty {
+    %kms_keys.Properties {
+        EnableKeyRotation == true << KMS keys must have automatic rotation enabled >>
+        Description exists << KMS keys must have descriptions >>
+        Description != "" << KMS key descriptions cannot be empty >>
+    }
+}
+
+rule kms_keys_secure_policies when %kms_keys !empty {
+    %kms_keys.Properties.KeyPolicy.Statement[*] {
+        Principal exists << KMS key policies must specify principals >>
+        when Principal.AWS exists {
+            Principal.AWS != "*" << KMS keys should not allow any AWS account access >>
+        }
+    }
+}
+
+# =============================================================================
+# CLOUDWATCH LOGGING
+# =============================================================================
+
+let log_groups = Resources.*[ Type == 'AWS::Logs::LogGroup' ]
+
+rule log_groups_retention_set when %log_groups !empty {
+    %log_groups.Properties {
+        RetentionInDays exists << Log groups must have retention periods >>
+        RetentionInDays in [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653] << Use valid retention periods >>
+        RetentionInDays <= 90 << Keep retention reasonable for cost optimization >>
+    }
+}
+
+# =============================================================================
+# COST OPTIMIZATION
+# =============================================================================
+
+let ec2_instances = Resources.*[ Type == 'AWS::EC2::Instance' ]
+
+rule ec2_instances_cost_effective when %ec2_instances !empty {
+    %ec2_instances.Properties {
+        InstanceType == /^[t3|t4g]\.(nano|micro|small|medium)$/ << Use cost-effective instance types >>
+        when Monitoring exists {
+            Monitoring == false << Disable detailed monitoring unless required >>
+        }
+    }
+}
+
+# =============================================================================
+# BASIC CI/CD SECURITY
+# =============================================================================
+
+let codebuild_projects = Resources.*[ Type == 'AWS::CodeBuild::Project' ]
+
+rule codebuild_secure_environment when %codebuild_projects !empty {
+    %codebuild_projects.Properties {
+        ServiceRole exists << CodeBuild projects must have service roles >>
+        Environment.Type in ["LINUX_CONTAINER", "WINDOWS_CONTAINER"] << Use supported environment types >>
+    }
+}
+
+let codepipelines = Resources.*[ Type == 'AWS::CodePipeline::Pipeline' ]
+
+rule codepipeline_artifact_encryption when %codepipelines !empty {
+    %codepipelines.Properties.ArtifactStore {
+        EncryptionKey exists << Pipeline artifacts must be encrypted >>
+        EncryptionKey.Type == "KMS" << Use KMS for artifact encryption >>
+    }
+}
